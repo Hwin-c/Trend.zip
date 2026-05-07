@@ -14,9 +14,11 @@
     "@google/genai": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
+    "axios": "^1.16.0",
     "clsx": "^2.1.1",
-    "dotenv": "^17.2.3",
-    "express": "^4.21.2",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^4.22.1",
     "firebase": "^12.11.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
@@ -33,5 +35,18 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
-  }
+  },
+  "description": "DBdigging: 음악 디깅 기능 구현",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hwin-c/DBdigging.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Hwin-c/DBdigging/issues"
+  },
+  "homepage": "https://github.com/Hwin-c/DBdigging#readme"
 }
