@@ -100,6 +100,17 @@ export const fetchParentGenreById = async (genreId: string): Promise<ParentGenre
   }
 };
 
+export const fetchAllParentGenres = async (): Promise<ParentGenre[]> => {
+  try {
+    const colRef = collection(db, 'parent_genres');
+    const snapshot = await getDocs(colRef);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ParentGenre));
+  } catch (error) {
+    console.error("Error fetching all parent genres:", error);
+    return [];
+  }
+};
+
 export const fetchTracksByGenre = async (genreName: string, maxLimit: number = 20): Promise<Track[]> => {
   try {
     const tracksRef = collection(db, 'tracks');

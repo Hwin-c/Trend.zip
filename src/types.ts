@@ -21,6 +21,7 @@ export interface TrackSnapshot {
   valence?: number;
   features?: AudioFeatures;
   album_cover?: string;
+  spotify_uri?: string; // 'spotify:track:{id}' format
 }
 
 export interface Track {
@@ -37,9 +38,8 @@ export interface Track {
 
 export interface ParentGenre {
   id: string;
-  level: 1;
+  level: number;
   name: string;
-  children_genres: string[];
   average_audio_features: AudioFeatures;
   top_tracks: TrackSnapshot[];
   sub_genres_data?: SubGenre[];
@@ -47,11 +47,12 @@ export interface ParentGenre {
 
 export interface SubGenre {
   id: string;
-  level: 2;
+  level?: number;
   name: string;
-  parent_genre: string;
+  parent_genre?: string;
   average_audio_features: AudioFeatures;
-  top_tracks: TrackSnapshot[];
+  // Note: actual DB sub_genres_data does NOT contain top_tracks.
+  // Tracks for a sub-genre must be queried from 'tracks' collection.
 }
 
 export interface HomeTrendingMetadata {

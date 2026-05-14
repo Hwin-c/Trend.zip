@@ -39,11 +39,11 @@ export const Minimap: React.FC<MinimapProps> = ({ onNavigate }) => {
   }, [log]);
 
   if (log.length === 0) {
-    return <div className="w-64 h-32 flex items-center justify-center text-white/30 text-xs">No exploration log yet.</div>;
+    return <div className="w-48 h-20 flex items-center justify-center text-white/30 text-xs">No exploration log yet.</div>;
   }
 
   return (
-    <div className="w-64 h-48 flex flex-col relative">
+    <div className="w-48 h-24 flex flex-col relative">
       <div className="absolute -top-10 right-0">
         <button 
           onClick={handleClear}
