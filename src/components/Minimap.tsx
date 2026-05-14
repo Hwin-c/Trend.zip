@@ -1,20 +1,24 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useDigging } from '../DiggingContext';
-import { MOCK_NODES } from '../mockData';
 import { motion } from 'motion/react';
 import { Trash2 } from 'lucide-react';
 
-export const Minimap: React.FC<{ onNavigate: (nodeId: string) => void }> = ({ onNavigate }) => {
+interface MinimapProps {
+  onNavigate?: (nodeId: string) => void;
+}
+
+// Simple deterministic hash to generate consistent coordinates for minimap
+const getHash = (str: string) => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash;
+};
+
+export const Minimap: React.FC<MinimapProps> = ({ onNavigate }) => {
   const { log, clearLog } = useDigging();
-
-  if (log.length === 0) return null;
-
-  // We need to map the log entries to their coordinates.
-  // Since the minimap is small, we can just use the original x,y coordinates but scaled down.
-  const pathNodes = log.map(entry => {
-    const node = MOCK_NODES.find(n => n.id === entry.nodeId);
-    return { ...entry, x: node?.x || 50, y: node?.y || 50 };
-  });
 
   const handleClear = () => {
     if (window.confirm('digging log(별자리)를 삭제하겠습니까?')) {
@@ -22,10 +26,25 @@ export const Minimap: React.FC<{ onNavigate: (nodeId: string) => void }> = ({ on
     }
   };
 
+  const pathNodes = useMemo(() => {
+    return log.map((entry, index) => {
+      // Use index and hash to create a deterministic but varied path
+      const hash = Math.abs(getHash(entry.nodeId));
+      // Base x on index to make it move forward generally, add some noise
+      const x = Math.min(Math.max((index * 15 + (hash % 20)) % 80 + 10, 10), 90);
+      // Randomize y somewhat deterministically
+      const y = Math.min(Math.max((hash % 80) + 10, 10), 90);
+      return { ...entry, x, y };
+    });
+  }, [log]);
+
+  if (log.length === 0) {
+    return <div className="w-64 h-32 flex items-center justify-center text-white/30 text-xs">No exploration log yet.</div>;
+  }
+
   return (
-    <div className="fixed bottom-8 right-8 w-64 h-64 bg-black/40 backdrop-blur-md border border-white/10 rounded-2xl p-4 z-50 flex flex-col">
-      <div className="flex justify-between items-center mb-2">
-        <div className="text-xs text-white/50 uppercase tracking-widest font-mono">Digging Log</div>
+    <div className="w-64 h-48 flex flex-col relative">
+      <div className="absolute -top-10 right-0">
         <button 
           onClick={handleClear}
           className="text-white/30 hover:text-red-400 transition-colors"
@@ -34,7 +53,7 @@ export const Minimap: React.FC<{ onNavigate: (nodeId: string) => void }> = ({ on
           <Trash2 size={14} />
         </button>
       </div>
-      <div className="relative w-full flex-1">
+      <div className="relative w-full flex-1 mt-2">
         <svg className="absolute inset-0 w-full h-full pointer-events-none">
           {pathNodes.map((node, i) => {
             if (i === 0) return null;
@@ -62,13 +81,13 @@ export const Minimap: React.FC<{ onNavigate: (nodeId: string) => void }> = ({ on
             key={`node-${node.id}-${i}`}
             className="absolute transform -translate-x-1/2 -translate-y-1/2 group cursor-pointer"
             style={{ left: `${node.x}%`, top: `${node.y}%` }}
-            onClick={() => onNavigate(node.nodeId)}
+            onClick={() => onNavigate && onNavigate(node.nodeId)}
           >
             <div className="w-1.5 h-1.5 bg-white rounded-full shadow-[0_0_5px_rgba(255,255,255,0.8)] group-hover:scale-150 transition-transform" />
             
             {/* Tooltip */}
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-black/80 text-[10px] text-white whitespace-nowrap rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-white/10">
-              {node.nodeName} ({node.nodeType.replace('_', ' ')})
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-black/80 text-[10px] text-white whitespace-nowrap rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-white/10 z-50">
+              {node.nodeName}
             </div>
           </div>
         ))}

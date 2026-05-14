@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { DiggingLogEntry, NodeType } from './types';
-import { auth, isMock, mockSignIn, mockSignOut, saveLogToFirestore } from './lib/firebase';
+import { auth, saveLogToFirestore } from './lib/firebase';
 import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
 
 interface DiggingContextType {
@@ -20,15 +20,11 @@ export const DiggingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [user, setUser] = useState<User | any | null>(null);
 
   useEffect(() => {
-    if (!isMock && auth) {
+    if (auth) {
       const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
         setUser(currentUser);
       });
       return () => unsubscribe();
-    } else {
-      // Mock auth state
-      const savedUser = localStorage.getItem('mock_user');
-      if (savedUser) setUser(JSON.parse(savedUser));
     }
   }, []);
 
@@ -45,11 +41,7 @@ export const DiggingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, []);
 
   const login = async () => {
-    if (isMock) {
-      const res = await mockSignIn();
-      setUser(res.user);
-      localStorage.setItem('mock_user', JSON.stringify(res.user));
-    } else if (auth) {
+    if (auth) {
       const provider = new GoogleAuthProvider();
       try {
         await signInWithPopup(auth, provider);
@@ -60,11 +52,7 @@ export const DiggingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const logout = async () => {
-    if (isMock) {
-      await mockSignOut();
-      setUser(null);
-      localStorage.removeItem('mock_user');
-    } else if (auth) {
+    if (auth) {
       await signOut(auth);
     }
   };
