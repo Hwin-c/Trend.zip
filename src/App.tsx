@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Constellation } from './components/Constellation';
 import { Minimap } from './components/Minimap';
 import { DiggingProvider, useDigging } from './DiggingContext';
-import { NodeData, ParentGenre, SubGenre, TrackSnapshot } from './types';
+import { NodeData, ParentGenre, SubGenre, TrackSnapshot, AudioFeatures } from './types';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   db, fetchHomeTrending, fetchAllGenresMetadata, fetchParentGenreById, fetchAllParentGenres,
@@ -11,7 +11,6 @@ import {
 import { doc, getDoc, collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 import { LeftPanel } from './components/LeftPanel';
 import { RightPanel } from './components/RightPanel';
-import { TunedExplorePanel } from './components/TunedExplorePanel';
 import { SearchDropdown } from './components/SearchDropdown';
 import { PlaylistModal } from './components/PlaylistModal';
 import { loginWithSpotify, handleSpotifyCallback, isLoggedIn, logout, getSpotifyProfile } from './lib/spotifyAuth';
@@ -42,7 +41,7 @@ const SpotifyIcon = () => (
 );
 
 function MainApp() {
-  const [mode, setMode] = useState<'home' | 'explore' | 'tuned'>('home');
+  const [mode, setMode] = useState<'home' | 'explore'>('home');
   const [exploreTab, setExploreTab] = useState<'genre' | 'song'>('genre');
   const [showSubGenres, setShowSubGenres] = useState<boolean>(false);
   const [currentNode, setCurrentNode] = useState<NodeData | null>(null);
@@ -56,6 +55,85 @@ function MainApp() {
 
   const [isLoadingSubGenres, setIsLoadingSubGenres] = useState(false);
 
+  // 헬퍼 함수: parentName(대장르 또는 세부 장르 이름)을 이용해 부모의 average_audio_features 조회
+  const getParentGenreFeatures = useCallback((parentName?: string): AudioFeatures | undefined => {
+    if (!parentName) return undefined;
+    
+    const parentNameLower = parentName.toLowerCase();
+    
+    // 1. cachedGenres 내부의 세부 장르 중 일치하는 것이 있는지 탐색
+    for (const [_, parentGenre] of cachedGenres.entries()) {
+      if (parentGenre.sub_genres_data) {
+        const sub = parentGenre.sub_genres_data.find(sg => sg.name.toLowerCase() === parentNameLower);
+        if (sub && sub.average_audio_features) {
+          return sub.average_audio_features;
+        }
+      }
+    }
+    
+    // 2. 대분류 메타데이터에서 일치하는 것이 있는지 탐색
+    const big = allGenresMeta.find(g => g.name.toLowerCase() === parentNameLower);
+    if (big && big.average_audio_features) {
+      return big.average_audio_features;
+    }
+    
+    return undefined;
+  }, [cachedGenres, allGenresMeta]);
+
+  // 헬퍼 함수: parentName을 기반으로 NodeData에 들어갈 정보를 온전히 찾아와 복원
+  const handleRestoreParentNode = useCallback((parentName?: string) => {
+    if (!parentName) {
+      setCurrentNode(null);
+      return;
+    }
+    
+    const parentNameLower = parentName.toLowerCase();
+    
+    // 1. 세부 장르 중 일치하는 것이 있는지 탐색
+    for (const [_, parentGenre] of cachedGenres.entries()) {
+      if (parentGenre.sub_genres_data) {
+        const sub = parentGenre.sub_genres_data.find(sg => sg.name.toLowerCase() === parentNameLower);
+        if (sub) {
+          setCurrentNode({
+            id: sub.id,
+            type: 'sub_genre',
+            name: sub.name,
+            parentGenre: parentGenre.name,
+            audioFeatures: sub.average_audio_features
+          });
+          return;
+        }
+      }
+    }
+    
+    // 2. 대장르 중 일치하는 것이 있는지 탐색
+    const big = allGenresMeta.find(g => g.name.toLowerCase() === parentNameLower);
+    if (big) {
+      setCurrentNode({
+        id: big.id,
+        type: 'big_genre',
+        name: big.name,
+        audioFeatures: big.average_audio_features
+      });
+      return;
+    }
+    
+    setCurrentNode(null);
+  }, [cachedGenres, allGenresMeta]);
+
+  // 헬퍼 함수: parentName이 세부 장르인지 대분류 장르인지 판단
+  const isSubGenre = useCallback((genreName?: string): boolean => {
+    if (!genreName) return false;
+    const nameLower = genreName.toLowerCase();
+    for (const [_, parentGenre] of cachedGenres.entries()) {
+      if (parentGenre.sub_genres_data) {
+        const found = parentGenre.sub_genres_data.some(sg => sg.name.toLowerCase() === nameLower);
+        if (found) return true;
+      }
+    }
+    return false;
+  }, [cachedGenres]);
+
   // Position cache for smooth sub-genre toggle (no re-layout of existing nodes)
   const [nodePositionCache, setNodePositionCache] = useState<Map<string, { x: number; y: number }>>(new Map());
 
@@ -66,7 +144,6 @@ function MainApp() {
   // Deep Dive Pagination State
   const [deepTracks, setDeepTracks] = useState<TrackSnapshot[]>([]);
   const [isDeepDiving, setIsDeepDiving] = useState(false);
-  const [tunedTracks, setTunedTracks] = useState<TrackSnapshot[]>([]);
 
   // Spotify Auth State
   const [spotifyLoggedIn, setSpotifyLoggedIn] = useState(isLoggedIn());
@@ -232,11 +309,39 @@ function MainApp() {
 
     // Extreme Denormalization: Fetch Full ParentGenre only once
     if (node.type === 'big_genre') {
-      if (!cachedGenres.has(node.id)) {
-        const fullGenre = await fetchParentGenreById(node.id);
+      let fullGenre = cachedGenres.get(node.id);
+      if (!fullGenre) {
+        fullGenre = await fetchParentGenreById(node.id);
         if (fullGenre) {
-          setCachedGenres(prev => new Map(prev).set(node.id, fullGenre));
+          setCachedGenres(prev => new Map(prev).set(node.id, fullGenre!));
         }
+      }
+      
+      // 대장르 top_tracks 앨범 자켓 비동기 로드 복원 루프
+      if (fullGenre && fullGenre.top_tracks) {
+        const targetGenreId = node.id;
+        fullGenre.top_tracks.forEach((track, index) => {
+          const hasCover = track.album_cover || (track as any).album_art;
+          if (!hasCover) {
+            fetchTrackFromSpotify(track.track_id).then(info => {
+              if (info?.album_art) {
+                setCachedGenres(prev => {
+                  const next = new Map(prev);
+                  const genre = next.get(targetGenreId) as ParentGenre | undefined;
+                  if (genre && genre.top_tracks && genre.top_tracks[index]) {
+                    const updatedTracks = [...genre.top_tracks];
+                    updatedTracks[index] = { 
+                      ...updatedTracks[index], 
+                      album_cover: info.album_art 
+                    };
+                    next.set(targetGenreId, { ...genre, top_tracks: updatedTracks } as ParentGenre);
+                  }
+                  return next;
+                });
+              }
+            });
+          }
+        });
       }
     }
 
@@ -370,8 +475,8 @@ function MainApp() {
     setCurrentNode(node);
   };
 
-  const startExploreMode = (tab: 'genre' | 'song', targetMode: 'explore' | 'tuned' = 'explore') => {
-    setMode(targetMode);
+  const startExploreMode = (tab: 'genre' | 'song') => {
+    setMode('explore');
     setExploreTab(tab);
     setCurrentNode(null);
     setDeepTracks([]);
@@ -414,42 +519,9 @@ function MainApp() {
     setIsDeepDiving(false);
   };
 
-  const handleTunedExplore = (features: any, genre: string) => {
-    // Sort homeTrending (or any fetched tracks) by distance to selected features
-    const calculateDistance = (t: TrackSnapshot) => {
-      const tf = t.features || { energy: t.energy, danceability: t.danceability };
-      if (!tf) return 999;
-      const dx = (tf.energy || 0) - (features.energy || 0);
-      const dy = (tf.danceability || 0) - (features.danceability || 0);
-      const dz = (tf.valence || 0) - (features.valence || 0);
-      return Math.sqrt(dx * dx + dy * dy + dz * dz);
-    };
-
-    // Sort and pick top 5
-    const matched = [...homeTrending].sort((a, b) => calculateDistance(a) - calculateDistance(b)).slice(0, 5);
-    setTunedTracks(matched);
-    setCurrentNode({ id: 'spaceship', type: 'spaceship', name: 'Spaceship', x: 50, y: 50 });
-  };
-
   // Node Calculation Logic
   const displayNodes = useMemo(() => {
     if (mode === 'home') return [];
-
-    if (mode === 'tuned' && currentNode?.type === 'spaceship') {
-      // Show matched tracks around spaceship
-      return tunedTracks.map((t, i) => {
-        const angle = (i / tunedTracks.length) * Math.PI * 2;
-        return {
-          id: t.track_id, type: 'song', name: t.name,
-          x: 50 + Math.random() * 10, y: 50 + Math.random() * 10,
-          trackSnapshot: t, audioFeatures: t.features, parentGenre: 'Tuned'
-        };
-      }) as NodeData[];
-    }
-
-    if (mode === 'tuned' && !currentNode) {
-      return []; // Do not show genre constellations on initial tuned screen
-    }
 
     if (!currentNode) {
       // Root View: Parent Genres (Limit to 30)
@@ -653,32 +725,13 @@ function MainApp() {
         title: '대분류 장르 선택',
         subtitle: '총 30개 장르를 탐험하고 오디오 육각형을 디깅하세요',
         items,
-        onItemClick: handleNodeClick
+        onItemClick: handleNodeClick,
+        showTabSwitcher: false,
+        showSubGenreToggle: true
       };
     }
 
-    // 2. Spaceship tuned view
-    if (currentNode.type === 'spaceship') {
-      const items = tunedTracks.map(t => ({
-        id: t.track_id,
-        name: t.name,
-        type: 'song' as const,
-        audioFeatures: t.features || { energy: t.energy, danceability: t.danceability, valence: t.valence } as any,
-        artists: t.artists,
-        albumCover: t.album_cover,
-        rawObject: {
-          id: t.track_id, type: 'song', name: t.name,
-          trackSnapshot: t, audioFeatures: t.features, parentGenre: 'Tuned'
-        }
-      }));
-      return {
-        type: 'genre' as const,
-        title: '추천 수록곡 목록',
-        subtitle: '스포티파이 오디오 피처 유사도 분석 결과',
-        items,
-        onItemClick: handleNodeClick
-      };
-    }
+
 
     // 3. Parent Genre Selected View
     if (currentNode.type === 'big_genre') {
@@ -696,10 +749,12 @@ function MainApp() {
         }));
         return {
           type: 'genre' as const,
-          title: `${currentNode.name} 세부 장르`,
-          subtitle: '세부 서브 장르를 클릭하여 탐사 대상을 좁히세요',
+          title: `${currentNode.name} 장르`,
+          subtitle: '하위 장르들을 클릭하여 탐사 대상을 좁히세요',
           items,
-          onItemClick: handleNodeClick
+          onItemClick: handleNodeClick,
+          showTabSwitcher: true,
+          showSubGenreToggle: false
         };
       } else {
         const songNodes = displayNodes.filter(n => n.type === 'song');
@@ -709,7 +764,7 @@ function MainApp() {
           type: 'song' as const,
           audioFeatures: n.audioFeatures,
           artists: n.trackSnapshot?.artists || '',
-          albumCover: n.trackSnapshot?.album_cover || '',
+          albumCover: n.trackSnapshot?.album_cover || n.trackSnapshot?.album_art || '',
           rawObject: n
         }));
         return {
@@ -717,7 +772,9 @@ function MainApp() {
           title: `${currentNode.name} 수록곡`,
           subtitle: '인기곡을 장르 탐험선에 탑재하여 오디오 신호를 수신하세요',
           items,
-          onItemClick: handleNodeClick
+          onItemClick: handleNodeClick,
+          showTabSwitcher: true,
+          showSubGenreToggle: false
         };
       }
     }
@@ -731,15 +788,17 @@ function MainApp() {
         type: 'song' as const,
         audioFeatures: n.audioFeatures,
         artists: n.trackSnapshot?.artists || '',
-        albumCover: n.trackSnapshot?.album_cover || '',
+        albumCover: n.trackSnapshot?.album_cover || n.trackSnapshot?.album_art || '',
         rawObject: n
       }));
       return {
         type: 'genre' as const,
-        title: `${currentNode.name} 수록곡`,
-        subtitle: '세부 장르 소속 수록곡 신호 목록',
+        title: `${currentNode.name} 하위 장르`,
+        subtitle: '하위 장르 소속 수록곡 신호 목록',
         items,
-        onItemClick: handleNodeClick
+        onItemClick: handleNodeClick,
+        showTabSwitcher: false,
+        showSubGenreToggle: false
       };
     }
 
@@ -768,16 +827,20 @@ function MainApp() {
         isSpotifyLoggedIn: spotifyLoggedIn,
         isLiked: isTrackLiked,
         onLike: handleLikeTrack,
-        onAddToPlaylist: handleAddToPlaylist
+        onAddToPlaylist: handleAddToPlaylist,
+        showTabSwitcher: false,
+        showSubGenreToggle: false
       };
     }
 
     return {
       type: 'root' as const,
       title: '디깅 레이더 장르 목록',
-      items: []
+      items: [],
+      showTabSwitcher: false,
+      showSubGenreToggle: false
     };
-  }, [currentNode, allGenresMeta, cachedGenres, exploreTab, refreshKey, displayNodes, tunedTracks, spotifyLoggedIn, isTrackLiked]);
+  }, [currentNode, allGenresMeta, cachedGenres, exploreTab, refreshKey, displayNodes, spotifyLoggedIn, isTrackLiked]);
 
   if (isLoading) {
     return (
@@ -801,7 +864,8 @@ function MainApp() {
         style={{
           gridRow: '1',
           gridColumn: mode === 'home' ? '1' : '1 / span 3',
-          backgroundImage: `url(${spaceshipTexture})`,
+          backgroundImage: mode === 'home' ? 'none' : `url(${spaceshipTexture})`,
+          backgroundColor: mode === 'home' ? '#050505' : undefined,
           backgroundRepeat: 'repeat',
           backgroundSize: '200px 200px',
         }}
@@ -822,14 +886,7 @@ function MainApp() {
                   <>
                     <span>&gt;</span>
                     <button
-                      onClick={() => {
-                        const parent = allGenresMeta.find(g => g.name === currentNode.parentGenre);
-                        if (parent) {
-                          setCurrentNode({ id: parent.id, type: 'big_genre', name: parent.name });
-                        } else {
-                          setCurrentNode(null);
-                        }
-                      }}
+                      onClick={() => handleRestoreParentNode(currentNode.parentGenre)}
                       className="hover:text-white transition-colors uppercase"
                     >
                       {currentNode.parentGenre}
@@ -917,6 +974,8 @@ function MainApp() {
                 onToggleSubGenres={handleToggleSubGenres}
                 isExploreDeep={mode === 'explore' && currentNode !== null}
                 isLoadingSubGenres={isLoadingSubGenres}
+                showTabSwitcher={leftPanelProps.showTabSwitcher}
+                showSubGenreToggle={leftPanelProps.showSubGenreToggle}
               />
             </motion.div>
           </AnimatePresence>
@@ -942,16 +1001,6 @@ function MainApp() {
           activeNodeId={currentNode?.id}
           onPositionsSettled={handlePositionsSettled}
         />
-        
-        {/* TunedExplorePanel if mode is tuned and no node is selected */}
-        {mode === 'tuned' && !currentNode && (
-          <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-            <TunedExplorePanel onExplore={(features) => {
-              setCurrentNode({ id: 'ship', type: 'spaceship', name: '', x: 50, y: 50 });
-            }} />
-          </div>
-        )}
-
         {/* 웰컴/홈 오버레이 뷰 (mode === 'home') */}
         {mode === 'home' && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-between py-6 pointer-events-none bg-black/35 backdrop-blur-[2px]">
@@ -959,12 +1008,9 @@ function MainApp() {
               <h2 className="text-3xl md:text-4xl font-bold leading-tight mb-6 drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)]">
                 알고리즘을 벗어나,<br />당신만의 음악 우주를 탐험하세요.
               </h2>
-              <div className="flex items-center justify-center gap-4">
-                <button onClick={() => startExploreMode('genre')} className="px-6 py-3 rounded-full border border-[#B026FF] bg-[#2A0845]/70 text-white font-medium text-sm hover:bg-[#B026FF]/35 hover:shadow-[0_0_20px_rgba(176,38,255,0.5)] transition-all duration-300 backdrop-blur-sm cursor-pointer">
+              <div className="flex items-center justify-center">
+                <button onClick={() => startExploreMode('genre')} className="px-8 py-3 rounded-full border border-[#B026FF] bg-[#2A0845]/70 text-white font-medium text-sm hover:bg-[#B026FF]/35 hover:shadow-[0_0_20px_rgba(176,38,255,0.5)] transition-all duration-300 backdrop-blur-sm cursor-pointer">
                   장르별 음악 탐색 시작
-                </button>
-                <button onClick={() => startExploreMode('song', 'tuned')} className="px-6 py-3 rounded-full border border-[#10B981] bg-[#064E3B]/70 text-white font-medium text-sm hover:bg-[#10B981]/35 hover:shadow-[0_0_20px_rgba(16,185,129,0.5)] transition-all duration-300 backdrop-blur-sm cursor-pointer">
-                  노래 기반 탐색 시작
                 </button>
               </div>
             </div>
@@ -1045,17 +1091,44 @@ function MainApp() {
                 exit={{ opacity: 0, x: 20 }} 
                 className="h-full w-full"
               >
-                {(currentNode?.type === 'big_genre' || currentNode?.type === 'sub_genre') && currentNode.audioFeatures ? (
-                  <RightPanel title={`${currentNode.name} 특성`} subtitle="장르 평균 분석" features={currentNode.audioFeatures} />
-                ) : currentNode?.type === 'song' && currentNode.audioFeatures ? (
-                  <RightPanel title="곡 오디오 분석" subtitle={currentNode.trackSnapshot!.name}
+                {currentNode && currentNode.type === 'big_genre' && currentNode.audioFeatures ? (
+                  <RightPanel 
+                    title={`${currentNode.name} 특성`} 
+                    subtitle="장르 평균 분석" 
+                    features={currentNode.audioFeatures} 
+                    featuresLabel="장르"
+                  />
+                ) : currentNode && currentNode.type === 'sub_genre' && currentNode.audioFeatures ? (
+                  <RightPanel 
+                    title={`${currentNode.name} 특성`} 
+                    subtitle="장르 평균 분석" 
                     features={allGenresMeta.find(g => g.name === currentNode.parentGenre)?.average_audio_features || {}}
                     compareFeatures={currentNode.audioFeatures}
+                    featuresLabel="장르"
+                    compareFeaturesLabel="하위 장르"
+                  />
+                ) : currentNode && currentNode.type === 'song' && currentNode.audioFeatures ? (
+                  <RightPanel title="곡 오디오 분석" subtitle={currentNode.trackSnapshot!.name}
+                    features={getParentGenreFeatures(currentNode.parentGenre) || {}}
+                    compareFeatures={currentNode.audioFeatures}
+                    featuresLabel={isSubGenre(currentNode.parentGenre) ? '하위 장르' : '장르'}
+                    compareFeaturesLabel="노래"
                   />
                 ) : (
-                  allGenresMeta.length > 0 && (
-                    <RightPanel title={`${allGenresMeta[0].name} 특성`} subtitle="탐험대기 장르 가이드" features={allGenresMeta[0].average_audio_features} />
-                  )
+                  <GlassPanel className="w-full h-full text-white flex flex-col items-center justify-center border border-white/10 p-6 min-h-[220px]">
+                    <div className="flex flex-col items-center text-center gap-3">
+                      <div className="w-12 h-12 rounded-full border border-dashed border-[#00FFFF]/40 flex items-center justify-center animate-spin" style={{ animationDuration: '6s' }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-[#00FFFF]">
+                          <path d="M12 2v20M2 12h20" />
+                          <circle cx="12" cy="12" r="10" />
+                        </svg>
+                      </div>
+                      <span className="text-[13px] font-bold text-[#00FFFF]/80 font-mono uppercase tracking-widest">RADAR SIGNAL WAITING</span>
+                      <span className="text-[11px] text-white/40 leading-relaxed font-sans">
+                        분석할 장르 또는 곡 노드를 클릭하여<br />오디오 육각형 시그널을 확인하세요.
+                      </span>
+                    </div>
+                  </GlassPanel>
                 )}
               </motion.div>
             </AnimatePresence>
@@ -1079,7 +1152,8 @@ function MainApp() {
         style={{
           gridRow: '3',
           gridColumn: '1 / span 3',
-          backgroundImage: `url(${spaceshipTexture})`,
+          backgroundImage: mode === 'home' ? 'none' : `url(${spaceshipTexture})`,
+          backgroundColor: mode === 'home' ? '#050505' : undefined,
           backgroundRepeat: 'repeat',
           backgroundSize: '200px 200px',
         }}

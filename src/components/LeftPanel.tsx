@@ -32,6 +32,8 @@ interface LeftPanelProps {
   onToggleSubGenres?: () => void;
   isExploreDeep?: boolean;
   isLoadingSubGenres?: boolean;
+  showTabSwitcher?: boolean;
+  showSubGenreToggle?: boolean;
 }
 
 // 6가지 오디오 특성을 기반으로 인라인 SVG 레이더 차트(육각형)를 그리는 초경량 컴포넌트
@@ -116,7 +118,8 @@ const MiniHexagon: React.FC<{ features?: AudioFeatures; itemType: 'big_genre' | 
 
 export const LeftPanel: React.FC<LeftPanelProps> = ({ 
   type, title, subtitle, description, items = [], onItemClick, trackInfo, onLike, onAddToPlaylist, isLiked, isSpotifyLoggedIn,
-  exploreTab, setExploreTab, showSubGenres, onToggleSubGenres, isExploreDeep, isLoadingSubGenres
+  exploreTab, setExploreTab, showSubGenres, onToggleSubGenres, isExploreDeep, isLoadingSubGenres,
+  showTabSwitcher = false, showSubGenreToggle = false
 }) => {
   return (
     <GlassPanel 
@@ -136,50 +139,50 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
             </div>
 
             {/* 장르 | 노래 탭 스위처 & 세부 장르 토글 버튼 그룹 */}
-            {exploreTab !== undefined && (
-              <div className="mt-3 flex items-center justify-between gap-2 p-1 bg-white/[0.03] border border-white/5 rounded-xl">
-                {/* 장르 | 노래 스위처 */}
-                <div className={`flex items-center bg-black/40 p-0.5 rounded-lg border border-white/5 ${!isExploreDeep ? 'opacity-40' : ''}`}>
-                  <button
-                    disabled={!isExploreDeep}
-                    onClick={() => setExploreTab?.('genre')}
-                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all duration-300 ${
-                      !isExploreDeep 
-                        ? 'text-white/40 cursor-not-allowed'
-                        : exploreTab === 'genre'
-                          ? 'bg-gradient-to-r from-[#B026FF] to-[#7B2CBF] text-white shadow-[0_0_10px_rgba(176,38,255,0.4)] cursor-pointer'
-                          : 'text-white/60 hover:text-white hover:bg-white/5 cursor-pointer'
-                    }`}
-                  >
-                    장르
-                  </button>
-                  <button
-                    disabled={!isExploreDeep}
-                    onClick={() => setExploreTab?.('song')}
-                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all duration-300 ${
-                      !isExploreDeep
-                        ? 'text-white/40 cursor-not-allowed'
-                        : exploreTab === 'song'
-                          ? 'bg-gradient-to-r from-[#B026FF] to-[#7B2CBF] text-white shadow-[0_0_10px_rgba(176,38,255,0.4)] cursor-pointer'
-                          : 'text-white/60 hover:text-white hover:bg-white/5 cursor-pointer'
-                    }`}
-                  >
-                    노래
-                  </button>
-                </div>
+            {(showTabSwitcher || showSubGenreToggle) && (
+              <div className="mt-3">
+                <div className="flex items-center justify-between gap-2 p-1 bg-white/[0.03] border border-white/5 rounded-xl">
+                  {/* 장르 | 노래 스위처 */}
+                  {showTabSwitcher && setExploreTab && exploreTab && (
+                    <div className="flex items-center bg-black/40 p-0.5 rounded-lg border border-white/5">
+                      <button
+                        onClick={() => setExploreTab('genre')}
+                        className={`px-3 py-1 text-xs font-medium rounded-md transition-all duration-300 ${
+                          exploreTab === 'genre'
+                            ? 'bg-gradient-to-r from-[#B026FF] to-[#7B2CBF] text-white shadow-[0_0_10px_rgba(176,38,255,0.4)] cursor-pointer'
+                            : 'text-white/60 hover:text-white hover:bg-white/5 cursor-pointer'
+                        }`}
+                      >
+                        장르
+                      </button>
+                      <button
+                        onClick={() => setExploreTab('song')}
+                        className={`px-3 py-1 text-xs font-medium rounded-md transition-all duration-300 ${
+                          exploreTab === 'song'
+                            ? 'bg-gradient-to-r from-[#B026FF] to-[#7B2CBF] text-white shadow-[0_0_10px_rgba(176,38,255,0.4)] cursor-pointer'
+                            : 'text-white/60 hover:text-white hover:bg-white/5 cursor-pointer'
+                        }`}
+                      >
+                        노래
+                      </button>
+                    </div>
+                  )}
 
-                {/* 세부 장르 활성화 / 비활성화 버튼 */}
-                <button
-                  onClick={onToggleSubGenres}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all duration-300 flex items-center gap-1.5 cursor-pointer ${
-                    showSubGenres
-                      ? 'border-[#00FFFF] bg-[#00FFFF]/10 text-[#00FFFF] shadow-[0_0_10px_rgba(0,255,255,0.2)]'
-                      : 'border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white'
-                  }`}
-                >
-                  <span className={`w-1.5 h-1.5 rounded-full ${showSubGenres ? 'bg-[#00FFFF] animate-pulse' : 'bg-white/30'}`} />
-                  {isLoadingSubGenres ? '로드 중...' : showSubGenres ? '세부 장르 ON' : '세부 장르 OFF'}
-                </button>
+                  {/* 세부 장르 활성화 / 비활성화 버튼 */}
+                  {showSubGenreToggle && onToggleSubGenres && (
+                    <button
+                      onClick={onToggleSubGenres}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all duration-300 flex items-center gap-1.5 cursor-pointer ${
+                        showSubGenres
+                          ? 'border-[#00FFFF] bg-[#00FFFF]/10 text-[#00FFFF] shadow-[0_0_10px_rgba(0,255,255,0.2)]'
+                          : 'border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${showSubGenres ? 'bg-[#00FFFF] animate-pulse' : 'bg-white/30'}`} />
+                      {isLoadingSubGenres ? '로드 중...' : showSubGenres ? '세부 장르 ON' : '세부 장르 OFF'}
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>

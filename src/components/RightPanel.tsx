@@ -9,9 +9,11 @@ interface RightPanelProps {
   subtitle: string;
   features: AudioFeatures;
   compareFeatures?: AudioFeatures;
+  featuresLabel?: string;
+  compareFeaturesLabel?: string;
 }
 
-export const RightPanel: React.FC<RightPanelProps> = ({ title, subtitle, features, compareFeatures }) => {
+export const RightPanel: React.FC<RightPanelProps> = ({ title, subtitle, features, compareFeatures, featuresLabel, compareFeaturesLabel }) => {
   if (!features) return null;
 
   const formatPercent = (val?: number) => val ? `${Math.round(val * 100)}%` : '0%';
@@ -22,9 +24,17 @@ export const RightPanel: React.FC<RightPanelProps> = ({ title, subtitle, feature
     >
       <div className="flex-1 min-h-0 w-full p-4 flex flex-col justify-between">
         <h2 className="text-xl font-medium mb-1">{title}</h2>
-      <div className="text-sm text-white/50 mb-4 flex items-center gap-2">
-        <div className="w-4 h-4 bg-[#8B5CF6]/50 border border-[#8B5CF6] rounded-sm" />
-        {subtitle}
+      <div className="text-xs text-white/50 mb-4 flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1.5">
+          <div className="w-3.5 h-3.5 bg-[#8B5CF6]/50 border border-[#8B5CF6] rounded-sm" />
+          <span>{featuresLabel || subtitle}</span>
+        </div>
+        {compareFeatures && compareFeaturesLabel && (
+          <div className="flex items-center gap-1.5">
+            <div className="w-3.5 h-3.5 bg-[#10B981]/50 border border-[#10B981] rounded-sm" />
+            <span>{compareFeaturesLabel}</span>
+          </div>
+        )}
       </div>
 
       <div className="w-full flex-1 min-h-0 mb-4 relative flex items-center justify-center">

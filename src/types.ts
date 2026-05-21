@@ -1,4 +1,4 @@
-export type NodeType = 'big_genre' | 'sub_genre' | 'song' | 'artist' | 'album' | 'spaceship';
+export type NodeType = 'big_genre' | 'sub_genre' | 'song' | 'artist' | 'album';
 
 export interface AudioFeatures {
   energy?: number;

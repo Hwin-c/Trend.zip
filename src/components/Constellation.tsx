@@ -150,8 +150,8 @@ export const Constellation: React.FC<ConstellationProps> = ({ nodes, centerNode,
       const jitterX = ((hash & 0xFF) / 255 - 0.5) * 15;
       const jitterY = (((hash >> 8) & 0xFF) / 255 - 0.5) * 15;
 
-      // Spaceship or special centerNode overriding
-      if (node.type === 'spaceship' || node.id === 'spaceship' || node.id === 'ship') {
+      // Special centerNode overriding (spaceship fallback id check)
+      if (node.id === 'spaceship' || node.id === 'ship') {
         fx = 0;
         fy = 0;
       }
