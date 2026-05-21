@@ -78,6 +78,7 @@ export interface NodeData {
   childrenGenres?: string[];
   parentGenre?: string;
   topTracks?: TrackSnapshot[];
+  similarTracks?: TrackSnapshot[];
   trackSnapshot?: TrackSnapshot;
   artistName?: string;
   albumName?: string;

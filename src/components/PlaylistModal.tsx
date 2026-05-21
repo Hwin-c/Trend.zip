@@ -4,29 +4,82 @@ import { getUserPlaylists, addTrackToPlaylist, SpotifyPlaylist } from '../lib/sp
 interface PlaylistModalProps {
   trackId: string;
   trackName: string;
+  spotifyLoggedIn: boolean;
   onClose: () => void;
 }
 
-export const PlaylistModal: React.FC<PlaylistModalProps> = ({ trackId, trackName, onClose }) => {
+export const PlaylistModal: React.FC<PlaylistModalProps> = ({ trackId, trackName, spotifyLoggedIn, onClose }) => {
   const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
   const [loading, setLoading] = useState(true);
   const [addingTo, setAddingTo] = useState<string | null>(null);
   const [successId, setSuccessId] = useState<string | null>(null);
 
   useEffect(() => {
-    getUserPlaylists().then(p => {
-      setPlaylists(p);
+    if (!spotifyLoggedIn) {
+      // Guest Mode: load playlists from localStorage with default placeholders if empty
+      const localPlaylistsRaw = localStorage.getItem('guest_playlists');
+      let localPlaylists: SpotifyPlaylist[] = localPlaylistsRaw ? JSON.parse(localPlaylistsRaw) : [];
+      if (localPlaylists.length === 0) {
+        localPlaylists = [
+          { id: 'guest_pl_1', name: '🛸 Cosmic Voyage Digs', trackCount: 0, image: '', isPublic: true },
+          { id: 'guest_pl_2', name: '✨ Starry Horizon Mix', trackCount: 0, image: '', isPublic: false }
+        ];
+        localStorage.setItem('guest_playlists', JSON.stringify(localPlaylists));
+      }
+      setPlaylists(localPlaylists);
       setLoading(false);
-    });
-  }, []);
+    } else {
+      getUserPlaylists().then(p => {
+        setPlaylists(p);
+        setLoading(false);
+      });
+    }
+  }, [spotifyLoggedIn]);
 
   const handleAdd = async (playlist: SpotifyPlaylist) => {
     setAddingTo(playlist.id);
+
+    if (!spotifyLoggedIn) {
+      // Guest local storage track insertion simulation
+      const localPlaylistsRaw = localStorage.getItem('guest_playlists');
+      let localPlaylists: SpotifyPlaylist[] = localPlaylistsRaw ? JSON.parse(localPlaylistsRaw) : [];
+      
+      const tracksKey = `guest_playlist_tracks_${playlist.id}`;
+      const currentTracksRaw = localStorage.getItem(tracksKey);
+      let currentTracks: string[] = currentTracksRaw ? JSON.parse(currentTracksRaw) : [];
+      
+      if (!currentTracks.includes(trackId)) {
+        currentTracks.push(trackId);
+        localStorage.setItem(tracksKey, JSON.stringify(currentTracks));
+        
+        localPlaylists = localPlaylists.map(pl => {
+          if (pl.id === playlist.id) {
+            return { ...pl, trackCount: currentTracks.length };
+          }
+          return pl;
+        });
+        localStorage.setItem('guest_playlists', JSON.stringify(localPlaylists));
+        setPlaylists(localPlaylists);
+      }
+      
+      setAddingTo(null);
+      setSuccessId(playlist.id);
+      setTimeout(() => onClose(), 1200);
+      return;
+    }
+
     const success = await addTrackToPlaylist(playlist.id, trackId);
     setAddingTo(null);
     if (success) {
       setSuccessId(playlist.id);
       setTimeout(() => onClose(), 1200);
+    } else {
+      alert(
+        '스포티파이 플레이리스트에 곡을 추가하지 못했습니다. (Spotify API 403 오류 등)\n\n원인 및 해결 방법:\n' +
+        '1. [권한 갱신 필요] 이전에 로그인한 세션에 권한(Scope)이 누락되었을 수 있습니다. 상단 우측 스포티파이 연결 완료 버튼을 눌러 로그아웃한 후, 다시 로그인해 주세요.\n' +
+        '2. [테스터 계정 등록 필요] 스포티파이 앱이 개발 모드인 경우, 등록된 개발자 계정 또는 테스터(Users and Requests) 계정으로만 수정 권한 API 호출이 허용됩니다.\n' +
+        '3. [플레이리스트 소유권] 본인이 생성하거나 편집 권한(협업 가능)이 있는 플레이리스트가 맞는지 확인해 주세요. 다른 유저의 플레이리스트에는 곡을 추가할 수 없습니다.'
+      );
     }
   };
 

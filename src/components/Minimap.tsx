@@ -39,18 +39,18 @@ export const Minimap: React.FC<MinimapProps> = ({ onNavigate }) => {
   }, [log]);
 
   if (log.length === 0) {
-    return <div className="w-48 h-20 flex items-center justify-center text-white/30 text-xs">No exploration log yet.</div>;
+    return <div className="w-full h-full flex items-center justify-center text-white/35 text-sm font-mono tracking-wider">// NO EXPLORATION LOG</div>;
   }
 
   return (
-    <div className="w-48 h-24 flex flex-col relative">
-      <div className="absolute -top-10 right-0">
+    <div className="w-full h-full flex flex-col relative">
+      <div className="absolute top-0 right-0 z-10">
         <button 
           onClick={handleClear}
-          className="text-white/30 hover:text-red-400 transition-colors"
+          className="text-white/25 hover:text-red-400/90 transition-colors p-1 cursor-pointer"
           title="Clear Log"
         >
-          <Trash2 size={14} />
+          <Trash2 size={12} />
         </button>
       </div>
       <div className="relative w-full flex-1 mt-2">
@@ -86,7 +86,7 @@ export const Minimap: React.FC<MinimapProps> = ({ onNavigate }) => {
             <div className="w-1.5 h-1.5 bg-white rounded-full shadow-[0_0_5px_rgba(255,255,255,0.8)] group-hover:scale-150 transition-transform" />
             
             {/* Tooltip */}
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-black/80 text-[10px] text-white whitespace-nowrap rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-white/10 z-50">
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 px-2.5 py-1.5 bg-black/85 text-sm text-white whitespace-nowrap rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-white/10 z-50 font-bold">
               {node.nodeName}
             </div>
           </div>

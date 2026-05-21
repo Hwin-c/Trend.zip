@@ -5,9 +5,10 @@ import { DiggingProvider, useDigging } from './DiggingContext';
 import { NodeData, ParentGenre, SubGenre, TrackSnapshot } from './types';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  fetchHomeTrending, fetchAllGenresMetadata, fetchParentGenreById, fetchAllParentGenres,
+  db, fetchHomeTrending, fetchAllGenresMetadata, fetchParentGenreById, fetchAllParentGenres,
   fetchTracksByGenre,
 } from './lib/firebase';
+import { doc, getDoc, collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 import { LeftPanel } from './components/LeftPanel';
 import { RightPanel } from './components/RightPanel';
 import { TunedExplorePanel } from './components/TunedExplorePanel';
@@ -16,6 +17,10 @@ import { PlaylistModal } from './components/PlaylistModal';
 import { loginWithSpotify, handleSpotifyCallback, isLoggedIn, logout, getSpotifyProfile } from './lib/spotifyAuth';
 import { fetchTrackFromSpotify, saveTrack, removeSavedTrack, checkSavedTrack } from './lib/spotify';
 import { parseArtists } from './lib/utils';
+import { GlassPanel } from './components/GlassPanel';
+import spaceshipTexture from './assets/spaceship_texture.webp';
+import spaceNebulaBg from './assets/space_nebula_bg.webp';
+
 
 // SVG Icons
 const SearchIcon = () => (
@@ -96,9 +101,11 @@ function MainApp() {
 
   const handleSpotifyLogin = () => {
     if (spotifyLoggedIn) {
-      logout();
-      setSpotifyLoggedIn(false);
-      setSpotifyProfile(null);
+      if (window.confirm('로그아웃하시겠습니까?')) {
+        logout();
+        setSpotifyLoggedIn(false);
+        setSpotifyProfile(null);
+      }
     } else {
       loginWithSpotify();
     }
@@ -198,6 +205,12 @@ function MainApp() {
     setRefreshKey(prev => prev + 1);
   };
 
+  const handleWheelScroll = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (e.deltaY !== 0) {
+      e.currentTarget.scrollLeft += e.deltaY;
+    }
+  };
+
   const resetToHome = () => {
     setMode('home');
     setCurrentNode(null);
@@ -235,15 +248,111 @@ function MainApp() {
         track_id: t.track_id,
         name: t.name,
         artists: t.artists,
+        album_cover: (t as any).album_cover || (t as any).album_art,
         energy: t.audio_features?.energy,
         danceability: t.audio_features?.danceability,
         valence: t.audio_features?.valence,
         features: t.audio_features,
       }));
       node = { ...node, topTracks: mapped };
+
+      // Async visual cover restoration loop for sub_genre tracks
+      mapped.forEach((track, index) => {
+        if (!track.album_cover) {
+          fetchTrackFromSpotify(track.track_id).then(info => {
+            if (info?.album_art) {
+              setCurrentNode(prev => {
+                if (!prev || prev.id !== node.id || prev.type !== 'sub_genre') return prev;
+                const updatedTracks = [...(prev.topTracks || [])];
+                if (updatedTracks[index]) {
+                  updatedTracks[index] = { ...updatedTracks[index], album_cover: info.album_art };
+                }
+                return { ...prev, topTracks: updatedTracks };
+              });
+            }
+          });
+        }
+      });
     }
 
-    // Fetch album art from Spotify for song nodes
+    // Fetch similar tracks dynamically from Firestore for song nodes
+    if (node.type === 'song' && node.trackSnapshot && !node.similarTracks) {
+      const trackSnap = node.trackSnapshot;
+      (async () => {
+        try {
+          const trackDocRef = doc(db, 'tracks', trackSnap.track_id);
+          const trackDocSnap = await getDoc(trackDocRef);
+          let primaryGenre = '';
+          let parentGenreName = '';
+          
+          if (trackDocSnap.exists()) {
+            const trackData = trackDocSnap.data();
+            const genreList = trackData.Genre_List || [];
+            primaryGenre = genreList[0] || '';
+            const parentGenreList = trackData.Parent_Genre_List || [];
+            parentGenreName = parentGenreList[0] || '';
+          }
+          
+          if (primaryGenre) {
+            const tracksRef = collection(db, 'tracks');
+            const q = query(
+              tracksRef,
+              where("Genre_List", "array-contains", primaryGenre),
+              orderBy("popularity_score", "desc"),
+              limit(10)
+            );
+            const snapshot = await getDocs(q);
+            const fetchedTracks: TrackSnapshot[] = snapshot.docs.map(doc => {
+              const data = doc.data();
+              return {
+                track_id: doc.id,
+                name: data.name,
+                artists: data.artists,
+                album_cover: data.album_cover || data.album_art,
+                energy: data.audio_features?.energy,
+                danceability: data.audio_features?.danceability,
+                valence: data.audio_features?.valence,
+                features: data.audio_features,
+              };
+            });
+            
+            const filtered = fetchedTracks
+              .filter(t => t.track_id !== trackSnap.track_id)
+              .slice(0, 5);
+              
+            const updatedNode = { 
+              ...node, 
+              similarTracks: filtered,
+              parentGenre: parentGenreName || node.parentGenre
+            };
+            
+            setCurrentNode(updatedNode);
+            
+            // Async cover restoration loop for similar tracks
+            filtered.forEach((track, index) => {
+              if (!track.album_cover) {
+                fetchTrackFromSpotify(track.track_id).then(info => {
+                  if (info?.album_art) {
+                    setCurrentNode(prev => {
+                      if (!prev || prev.id !== node.id || prev.type !== 'song') return prev;
+                      const updatedSimilar = [...(prev.similarTracks || [])];
+                      if (updatedSimilar[index]) {
+                        updatedSimilar[index] = { ...updatedSimilar[index], album_cover: info.album_art };
+                      }
+                      return { ...prev, similarTracks: updatedSimilar };
+                    });
+                  }
+                });
+              }
+            });
+          }
+        } catch (error) {
+          console.error("Error loading similar tracks from Firestore:", error);
+        }
+      })();
+    }
+
+    // Fetch album art from Spotify for song nodes (self)
     if (node.type === 'song' && node.trackSnapshot && !node.trackSnapshot.album_cover) {
       fetchTrackFromSpotify(node.trackSnapshot.track_id).then(info => {
         if (info?.album_art) {
@@ -276,12 +385,32 @@ function MainApp() {
       track_id: t.track_id,
       name: t.name,
       artists: t.artists,
+      album_cover: (t as any).album_cover || (t as any).album_art,
       energy: t.audio_features?.energy,
       danceability: t.audio_features?.danceability,
       valence: t.audio_features?.valence,
       features: t.audio_features
     }));
     setDeepTracks(prev => [...prev, ...mappedTracks]);
+
+    // Async restoration loop for deep tracks
+    mappedTracks.forEach((track) => {
+      if (!track.album_cover) {
+        fetchTrackFromSpotify(track.track_id).then(info => {
+          if (info?.album_art) {
+            setDeepTracks(prev => {
+              const updated = [...prev];
+              const idx = updated.findIndex(u => u.track_id === track.track_id);
+              if (idx !== -1) {
+                updated[idx] = { ...updated[idx], album_cover: info.album_art };
+              }
+              return updated;
+            });
+          }
+        });
+      }
+    });
+
     setIsDeepDiving(false);
   };
 
@@ -437,18 +566,218 @@ function MainApp() {
 
     if (currentNode.type === 'song') {
       // Show similar songs & related entities
-      return [
-        { id: currentNode.id, type: 'song', name: currentNode.name, x: 0, y: 0 },
-        { id: 'g1', type: 'big_genre', name: currentNode.parentGenre || 'Genre', x: Math.random()*600 - 300, y: Math.random()*600 - 300 },
-        { id: 'a1', type: 'artist', name: currentNode.trackSnapshot?.artists || 'Artist', x: Math.random()*600 - 300, y: Math.random()*600 - 300 },
-        { id: 'al1', type: 'album', name: 'Album', x: Math.random()*600 - 300, y: Math.random()*600 - 300 },
-        { id: 's1', type: 'song', name: 'Similar Track 1', x: Math.random()*600 - 300, y: Math.random()*600 - 300 },
-        { id: 's2', type: 'song', name: 'Similar Track 2', x: Math.random()*600 - 300, y: Math.random()*600 - 300 },
-      ] as NodeData[];
+      const nodes: NodeData[] = [
+        { 
+          id: currentNode.id, 
+          type: 'song', 
+          name: currentNode.name, 
+          x: 0, 
+          y: 0,
+          trackSnapshot: currentNode.trackSnapshot,
+          audioFeatures: currentNode.audioFeatures
+        }
+      ];
+
+      // 1. 대장르 메타데이터 노드 추가
+      const parentGenreName = currentNode.parentGenre || 'Genre';
+      nodes.push({
+        id: 'g1',
+        type: 'big_genre',
+        name: parentGenreName,
+        x: (Math.random() - 0.5) * 300,
+        y: (Math.random() - 0.5) * 300
+      });
+
+      // 2. 아티스트 메타데이터 노드 추가
+      const artistName = currentNode.trackSnapshot ? parseArtists(currentNode.trackSnapshot.artists) : 'Artist';
+      nodes.push({
+        id: 'a1',
+        type: 'artist',
+        name: artistName,
+        x: (Math.random() - 0.5) * 300,
+        y: (Math.random() - 0.5) * 300
+      });
+
+      // 3. 앨범 메타데이터 노드 추가
+      const albumName = (currentNode.trackSnapshot as any)?.album_name || 'Album';
+      nodes.push({
+        id: 'al1',
+        type: 'album',
+        name: albumName,
+        x: (Math.random() - 0.5) * 300,
+        y: (Math.random() - 0.5) * 300
+      });
+
+      // 4. 유사 곡 노드 추가 (Firestore에서 가져온 5곡 연동)
+      if (currentNode.similarTracks && currentNode.similarTracks.length > 0) {
+        currentNode.similarTracks.forEach((t) => {
+          nodes.push({
+            id: t.track_id,
+            type: 'song',
+            name: t.name,
+            x: (Math.random() - 0.5) * 400,
+            y: (Math.random() - 0.5) * 400,
+            trackSnapshot: t,
+            audioFeatures: t.features || { energy: t.energy, danceability: t.danceability, valence: t.valence },
+            parentGenre: parentGenreName
+          });
+        });
+      } else {
+        nodes.push({
+          id: 's-loading',
+          type: 'song',
+          name: 'Loading Similar Tracks...',
+          x: (Math.random() - 0.5) * 300,
+          y: (Math.random() - 0.5) * 300
+        });
+      }
+
+      return nodes;
     }
 
     return [];
   }, [mode, currentNode, exploreTab, showSubGenres, allGenresMeta, cachedGenres, refreshKey]);
+
+  const leftPanelProps = useMemo(() => {
+    // 1. Root View (No Node selected or Home screen)
+    if (!currentNode) {
+      const items = allGenresMeta.slice(0, 30).map(pg => ({
+        id: pg.id,
+        name: pg.name,
+        type: 'big_genre' as const,
+        audioFeatures: pg.average_audio_features,
+        rawObject: { id: pg.id, type: 'big_genre', name: pg.name, audioFeatures: pg.average_audio_features }
+      }));
+      return {
+        type: 'root' as const,
+        title: '대분류 장르 선택',
+        subtitle: '총 30개 장르를 탐험하고 오디오 육각형을 디깅하세요',
+        items,
+        onItemClick: handleNodeClick
+      };
+    }
+
+    // 2. Spaceship tuned view
+    if (currentNode.type === 'spaceship') {
+      const items = tunedTracks.map(t => ({
+        id: t.track_id,
+        name: t.name,
+        type: 'song' as const,
+        audioFeatures: t.features || { energy: t.energy, danceability: t.danceability, valence: t.valence } as any,
+        artists: t.artists,
+        albumCover: t.album_cover,
+        rawObject: {
+          id: t.track_id, type: 'song', name: t.name,
+          trackSnapshot: t, audioFeatures: t.features, parentGenre: 'Tuned'
+        }
+      }));
+      return {
+        type: 'genre' as const,
+        title: '추천 수록곡 목록',
+        subtitle: '스포티파이 오디오 피처 유사도 분석 결과',
+        items,
+        onItemClick: handleNodeClick
+      };
+    }
+
+    // 3. Parent Genre Selected View
+    if (currentNode.type === 'big_genre') {
+      const parentData = cachedGenres.get(currentNode.id);
+      if (exploreTab === 'genre') {
+        const items = (parentData?.sub_genres_data || []).map(sg => ({
+          id: sg.id,
+          name: sg.name,
+          type: 'sub_genre' as const,
+          audioFeatures: sg.average_audio_features,
+          rawObject: {
+            id: sg.id, type: 'sub_genre', name: sg.name, parentGenre: currentNode.name,
+            audioFeatures: sg.average_audio_features
+          }
+        }));
+        return {
+          type: 'genre' as const,
+          title: `${currentNode.name} 세부 장르`,
+          subtitle: '세부 서브 장르를 클릭하여 탐사 대상을 좁히세요',
+          items,
+          onItemClick: handleNodeClick
+        };
+      } else {
+        const songNodes = displayNodes.filter(n => n.type === 'song');
+        const items = songNodes.map(n => ({
+          id: n.id,
+          name: n.name,
+          type: 'song' as const,
+          audioFeatures: n.audioFeatures,
+          artists: n.trackSnapshot?.artists || '',
+          albumCover: n.trackSnapshot?.album_cover || '',
+          rawObject: n
+        }));
+        return {
+          type: 'genre' as const,
+          title: `${currentNode.name} 수록곡`,
+          subtitle: '인기곡을 장르 탐험선에 탑재하여 오디오 신호를 수신하세요',
+          items,
+          onItemClick: handleNodeClick
+        };
+      }
+    }
+
+    // 4. Sub Genre Selected View
+    if (currentNode.type === 'sub_genre') {
+      const songNodes = displayNodes.filter(n => n.type === 'song');
+      const items = songNodes.map(n => ({
+        id: n.id,
+        name: n.name,
+        type: 'song' as const,
+        audioFeatures: n.audioFeatures,
+        artists: n.trackSnapshot?.artists || '',
+        albumCover: n.trackSnapshot?.album_cover || '',
+        rawObject: n
+      }));
+      return {
+        type: 'genre' as const,
+        title: `${currentNode.name} 수록곡`,
+        subtitle: '세부 장르 소속 수록곡 신호 목록',
+        items,
+        onItemClick: handleNodeClick
+      };
+    }
+
+    // 5. Track Detail selected
+    if (currentNode.type === 'song') {
+      const similar = (currentNode.similarTracks || []).map(t => ({
+        id: t.track_id,
+        name: t.name,
+        type: 'song' as const,
+        audioFeatures: t.features || { energy: t.energy, danceability: t.danceability, valence: t.valence } as any,
+        artists: t.artists,
+        albumCover: t.album_cover,
+        rawObject: {
+          id: t.track_id, type: 'song', name: t.name,
+          trackSnapshot: t, audioFeatures: t.features || { energy: t.energy, danceability: t.danceability, valence: t.valence },
+          parentGenre: currentNode.parentGenre
+        }
+      }));
+      return {
+        type: 'track' as const,
+        title: currentNode.trackSnapshot?.name || currentNode.name,
+        subtitle: currentNode.trackSnapshot?.artists ? parseArtists(currentNode.trackSnapshot.artists) : '',
+        items: similar,
+        onItemClick: handleNodeClick,
+        trackInfo: currentNode.trackSnapshot,
+        isSpotifyLoggedIn: spotifyLoggedIn,
+        isLiked: isTrackLiked,
+        onLike: handleLikeTrack,
+        onAddToPlaylist: handleAddToPlaylist
+      };
+    }
+
+    return {
+      type: 'root' as const,
+      title: '디깅 레이더 장르 목록',
+      items: []
+    };
+  }, [currentNode, allGenresMeta, cachedGenres, exploreTab, refreshKey, displayNodes, tunedTracks, spotifyLoggedIn, isTrackLiked]);
 
   if (isLoading) {
     return (
@@ -459,15 +788,24 @@ function MainApp() {
   }
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white overflow-hidden font-sans selection:bg-[#B026FF]/30">
-      {/* Background */}
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_#151030_0%,_#050510_100%)] opacity-100" />
-        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-40 mix-blend-screen" />
-      </div>
-
-      {/* Header */}
-      <header className="relative z-30 flex items-center justify-between px-8 py-6 bg-transparent">
+    <div 
+      className="w-screen h-screen bg-[#050505] text-white overflow-hidden font-sans selection:bg-[#B026FF]/30 grid relative box-border transition-all duration-500"
+      style={{
+        gridTemplateColumns: mode === 'home' ? '1fr' : '380px 1fr 320px',
+        gridTemplateRows: '80px 1fr 80px',
+      }}
+    >
+      {/* Row 1: Top HUD & Header */}
+      <header 
+        className="relative z-30 flex items-center justify-between px-8 box-border select-none border-b border-white/10"
+        style={{
+          gridRow: '1',
+          gridColumn: mode === 'home' ? '1' : '1 / span 3',
+          backgroundImage: `url(${spaceshipTexture})`,
+          backgroundRepeat: 'repeat',
+          backgroundSize: '200px 200px',
+        }}
+      >
         <div className="flex items-center gap-10">
           <h1 className="text-xl font-serif tracking-widest cursor-pointer" onClick={resetToHome}>DBDIGGING</h1>
           <div className="flex items-center gap-2 text-sm text-white/50 font-mono">
@@ -514,7 +852,7 @@ function MainApp() {
               value={searchQuery}
               onChange={(e) => { setSearchQuery(e.target.value); setSearchOpen(true); }}
               onFocus={() => setSearchOpen(true)}
-              className="bg-[#1A1A1A] text-white placeholder-white/40 text-sm rounded-full pl-11 pr-4 py-2.5 outline-none focus:bg-[#252525] transition-all w-[300px] border border-white/5"
+              className="bg-[#1A1A1A] text-white placeholder-white/40 text-sm rounded-full pl-11 pr-4 py-2 outline-none focus:bg-[#252525] transition-all w-[240px] border border-white/5"
             />
             {searchOpen && searchQuery.trim() && (
               <SearchDropdown
@@ -530,179 +868,229 @@ function MainApp() {
           <div className="flex items-center gap-4">
             <button
               onClick={handleSpotifyLogin}
-              className={`text-sm font-medium rounded-full px-5 py-2.5 flex items-center gap-2 transition-colors ${spotifyLoggedIn
+              className={`text-xs font-medium rounded-full px-4 py-2 flex items-center gap-2 transition-colors ${spotifyLoggedIn
                   ? 'bg-[#1DB954] text-black hover:bg-[#1ed760]'
                   : 'bg-[#1DB954] text-black hover:bg-[#1ed760]'
                 }`}
             >
               <SpotifyIcon /> {spotifyLoggedIn ? `Connected${spotifyProfile?.display_name ? ` (${spotifyProfile.display_name})` : ' ✓'}` : 'Connect to Spotify'}
             </button>
-            <button className="text-white/50 hover:text-white w-9 h-9 rounded-full border border-white/20 flex items-center justify-center transition-colors">
-              <UserIcon />
-            </button>
           </div>
         </div>
       </header>
 
-      {/* Top Controls (Explore Mode only) */}
-      {mode === 'explore' && (
-        <div className="absolute top-24 left-8 z-30 flex flex-col gap-4">
-          {currentNode && (
-            <div className="flex bg-[#111] border border-white/10 rounded-full overflow-hidden w-fit">
-              <button onClick={() => setExploreTab('genre')} className={`px-6 py-2 text-sm font-medium transition-colors ${exploreTab === 'genre' ? 'bg-[#B026FF] text-white' : 'text-white/50 hover:text-white'}`}>[장르]</button>
-              <button onClick={() => setExploreTab('song')} className={`px-6 py-2 text-sm font-medium transition-colors ${exploreTab === 'song' ? 'bg-[#B026FF] text-white' : 'text-white/50 hover:text-white'}`}>[노래]</button>
-            </div>
-          )}
-          {!currentNode && (
-            <button
-              onClick={handleToggleSubGenres}
-              disabled={isLoadingSubGenres}
-              className={`w-fit px-6 py-2 text-sm font-medium rounded-full transition-colors border ${showSubGenres ? 'bg-[#B026FF] text-white border-[#B026FF]' : 'bg-[#111] text-white/50 border-white/10 hover:text-white'} ${isLoadingSubGenres ? 'opacity-50 cursor-wait' : ''}`}
+      {/* Row 2, Column 1: Left Panel Zone */}
+      {mode !== 'home' && (
+        <div 
+          className="relative flex flex-col justify-start min-h-0 border-r border-white/10"
+          style={{
+            gridRow: '2',
+            gridColumn: '1',
+            backgroundImage: `url(${spaceshipTexture})`,
+            backgroundRepeat: 'repeat',
+            backgroundSize: '200px 200px',
+            padding: '12px',
+          }}
+        >
+          <AnimatePresence mode="wait">
+            <motion.div 
+              key={currentNode?.id || 'root'} 
+              initial={{ opacity: 0, x: -20 }} 
+              animate={{ opacity: 1, x: 0 }} 
+              exit={{ opacity: 0, x: -20 }} 
+              className="h-full w-full"
             >
-              {isLoadingSubGenres ? '데이터 불러오는 중...' : showSubGenres ? '[세부 장르 닫기]' : '[세부 장르 보기]'}
-            </button>
-          )}
-          {exploreTab === 'song' && (currentNode?.type === 'big_genre' || currentNode?.type === 'sub_genre') && (
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={handleRefreshSongs}
-                className="flex items-center justify-center gap-2 px-6 py-2 bg-[#10B981]/20 hover:bg-[#10B981]/40 border border-[#10B981]/50 text-[#10B981] text-sm font-medium rounded-full transition-all"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><path d="M16 21v-5h5"></path></svg>
-                노래 새로고침
-              </button>
-            </div>
-          )}
+              <LeftPanel
+                type={leftPanelProps.type}
+                title={leftPanelProps.title}
+                subtitle={leftPanelProps.subtitle}
+                items={leftPanelProps.items}
+                onItemClick={leftPanelProps.onItemClick}
+                trackInfo={leftPanelProps.trackInfo}
+                isSpotifyLoggedIn={leftPanelProps.isSpotifyLoggedIn}
+                isLiked={leftPanelProps.isLiked}
+                onLike={leftPanelProps.onLike}
+                onAddToPlaylist={leftPanelProps.onAddToPlaylist}
+                exploreTab={mode === 'explore' ? exploreTab : undefined}
+                setExploreTab={setExploreTab}
+                showSubGenres={showSubGenres}
+                onToggleSubGenres={handleToggleSubGenres}
+                isExploreDeep={mode === 'explore' && currentNode !== null}
+                isLoadingSubGenres={isLoadingSubGenres}
+              />
+            </motion.div>
+          </AnimatePresence>
         </div>
       )}
 
-      {/* Main Content Area */}
-      <main className="relative w-full h-[calc(100vh-85px)] z-10 flex flex-col">
-        {mode === 'home' ? (
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-between py-12 pointer-events-none">
-            <div className="text-center pointer-events-auto mt-20">
-              <h2 className="text-4xl md:text-5xl font-bold leading-tight mb-12 drop-shadow-2xl">
+      {/* Row 2, Column 2: Center Space Window */}
+      <div 
+        className="relative h-full overflow-hidden min-h-0 flex items-center justify-center transition-all duration-500"
+        style={{
+          gridRow: '2',
+          gridColumn: mode === 'home' ? '1' : '2',
+          backgroundImage: `url(${spaceNebulaBg})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+        }}
+      >
+        {/* D3 Constellation Star Map */}
+        <Constellation
+          nodes={displayNodes}
+          centerNode={currentNode || undefined}
+          onNodeClick={handleNodeClick}
+          activeNodeId={currentNode?.id}
+          onPositionsSettled={handlePositionsSettled}
+        />
+        
+        {/* TunedExplorePanel if mode is tuned and no node is selected */}
+        {mode === 'tuned' && !currentNode && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <TunedExplorePanel onExplore={(features) => {
+              setCurrentNode({ id: 'ship', type: 'spaceship', name: '', x: 50, y: 50 });
+            }} />
+          </div>
+        )}
+
+        {/* 웰컴/홈 오버레이 뷰 (mode === 'home') */}
+        {mode === 'home' && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-between py-6 pointer-events-none bg-black/35 backdrop-blur-[2px]">
+            <div className="text-center pointer-events-auto mt-[6vh] px-4">
+              <h2 className="text-3xl md:text-4xl font-bold leading-tight mb-6 drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)]">
                 알고리즘을 벗어나,<br />당신만의 음악 우주를 탐험하세요.
               </h2>
-              <div className="flex items-center justify-center gap-6">
-                <button onClick={() => startExploreMode('genre')} className="px-8 py-4 rounded-[2rem] border border-[#B026FF] bg-[#2A0845]/60 text-white font-medium text-lg hover:bg-[#B026FF]/30 hover:shadow-[0_0_30px_rgba(176,38,255,0.6)] transition-all duration-300 backdrop-blur-sm">
-                  [장르별 음악 탐색 시작하기]
+              <div className="flex items-center justify-center gap-4">
+                <button onClick={() => startExploreMode('genre')} className="px-6 py-3 rounded-full border border-[#B026FF] bg-[#2A0845]/70 text-white font-medium text-sm hover:bg-[#B026FF]/35 hover:shadow-[0_0_20px_rgba(176,38,255,0.5)] transition-all duration-300 backdrop-blur-sm cursor-pointer">
+                  장르별 음악 탐색 시작
                 </button>
-                <button onClick={() => startExploreMode('song', 'tuned')} className="px-8 py-4 rounded-[2rem] border border-[#10B981] bg-[#064E3B]/60 text-white font-medium text-lg hover:bg-[#10B981]/30 hover:shadow-[0_0_30px_rgba(16,185,129,0.6)] transition-all duration-300 backdrop-blur-sm">
-                  [노래 기반 탐색 시작하기]
+                <button onClick={() => startExploreMode('song', 'tuned')} className="px-6 py-3 rounded-full border border-[#10B981] bg-[#064E3B]/70 text-white font-medium text-sm hover:bg-[#10B981]/35 hover:shadow-[0_0_20px_rgba(16,185,129,0.5)] transition-all duration-300 backdrop-blur-sm cursor-pointer">
+                  노래 기반 탐색 시작
                 </button>
               </div>
             </div>
 
-            {/* Trending Section */}
-            <div className="w-full px-12 pointer-events-auto">
-              <div className="flex items-center gap-4 mb-4">
-                <h3 className="text-xl font-bold">요즘 뜨는 장르 & 신곡 파도타기</h3>
-                <div className="flex gap-2">
-                  <span className="px-3 py-1 bg-white/10 rounded-full text-xs text-white/70">Trending</span>
-                  <span className="px-3 py-1 bg-white/10 rounded-full text-xs text-white/70">K-Pop Rising</span>
+            {/* Trending Section Overlay inside central view */}
+            <div className="w-full max-w-5xl px-8 pointer-events-auto mb-[2vh]">
+              <div className="flex items-center gap-3 mb-3 justify-between">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold tracking-widest text-[#00FFFF] font-mono uppercase">인기 트렌딩 디깅 트랙</h3>
+                  <span className="px-2 py-0.5 bg-[#B026FF]/30 border border-[#B026FF]/50 rounded-full text-[9px] text-white/90 animate-pulse">Trending</span>
                 </div>
+                <span className="text-[10px] text-white/40 font-mono hidden sm:inline">← 마우스 휠을 굴려 가로로 스크롤하세요 →</span>
               </div>
-              <div className="flex gap-4 overflow-x-auto pb-4 no-scrollbar">
-                {homeTrending.map((track, i) => (
-                  <div key={i} className="min-w-[200px] bg-[#1A1A1A] rounded-xl p-3 border border-white/5 flex flex-col">
-                    <div className="text-xs text-white/50 mb-2 truncate">{parseArtists(track.artists)}</div>
-                    <div className="w-full aspect-square bg-white/5 rounded-lg mb-3 overflow-hidden">
-                      {track.album_cover && <img src={track.album_cover} alt={track.name} className="w-full h-full object-cover" />}
+              
+              <div 
+                onWheel={handleWheelScroll}
+                className="flex gap-4 overflow-x-auto pb-3 snap-x snap-mandatory max-w-full custom-scrollbar scroll-smooth"
+              >
+                {homeTrending.slice(0, 10).map((track, i) => (
+                  <div 
+                    key={i} 
+                    onClick={() => handleSearchSelectTrack(track, 'Trending')}
+                    className="min-w-[160px] max-w-[160px] bg-black/60 rounded-xl p-3 border border-white/5 flex flex-col backdrop-blur-md snap-start cursor-pointer hover:border-[#00FFFF]/30 hover:bg-black/80 hover:scale-[1.03] transition-all duration-300 group shrink-0"
+                  >
+                    <div className="w-full aspect-square bg-[#111] rounded-lg mb-2 overflow-hidden border border-white/10 relative">
+                      {track.album_cover ? (
+                        <img src={track.album_cover} alt={track.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-[#1A0B2E] to-[#0A0518]">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-[#B026FF]/50 animate-pulse mb-1">
+                            <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+                          </svg>
+                          <span className="text-[8px] text-white/20 font-mono uppercase">Hologram</span>
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-[#00FFFF]/10 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                     </div>
-                    <div className="text-sm text-white mb-2 truncate font-bold">{track.name}</div>
-                    <div className="flex items-center justify-between text-xs mb-1 text-white/70">
-                      <span>⚡ Energy</span><span>{track.energy?.toFixed(2) || track.features?.energy?.toFixed(2) || 'N/A'}</span>
-                    </div>
-                    <div className="w-full bg-white/10 h-1.5 rounded-full mb-2">
-                      <div className="bg-yellow-400 h-full rounded-full" style={{ width: `${(track.energy || track.features?.energy || 0) * 100}%` }} />
-                    </div>
-                    <div className="flex items-center justify-between text-xs mb-1 text-white/70">
-                      <span>🕺 Dance</span><span>{track.danceability?.toFixed(2) || track.features?.danceability?.toFixed(2) || 'N/A'}</span>
-                    </div>
-                    <div className="w-full bg-white/10 h-1.5 rounded-full">
-                      <div className="bg-purple-400 h-full rounded-full" style={{ width: `${(track.danceability || track.features?.danceability || 0) * 100}%` }} />
+                    <div className="text-[12px] text-white font-bold truncate group-hover:text-[#00FFFF] transition-colors leading-tight mb-0.5">{track.name}</div>
+                    <div className="text-[10px] text-white/50 truncate mb-2">{parseArtists(track.artists)}</div>
+                    
+                    <div className="mt-auto">
+                      <div className="flex items-center justify-between text-[9px] text-white/60 mb-1">
+                        <span>⚡ Energy</span>
+                        <span className="font-mono text-[#00FFFF] font-semibold">{(track.energy || track.features?.energy || 0.5).toFixed(2)}</span>
+                      </div>
+                      <div className="w-full bg-white/10 h-1 rounded-full overflow-hidden">
+                        <div className="bg-gradient-to-r from-[#00FFFF] to-[#B026FF] h-full rounded-full transition-all duration-500" style={{ width: `${(track.energy || track.features?.energy || 0.5) * 100}%` }} />
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
           </div>
-        ) : (
-          <>
-            <div className="absolute inset-0">
-              <Constellation
-                nodes={displayNodes}
-                centerNode={currentNode || undefined}
-                onNodeClick={handleNodeClick}
-                activeNodeId={currentNode?.id}
-                onPositionsSettled={handlePositionsSettled}
-              />
-            </div>
-            
+        )}
+      </div>
+
+      {/* Row 2, Column 3: Right Panel Zone (Radar Chart & DBDIGGING LOG) */}
+      {mode !== 'home' && (
+        <div 
+          className="relative flex flex-col justify-between gap-y-3 min-h-0 border-l border-white/10"
+          style={{
+            gridRow: '2',
+            gridColumn: '3',
+            backgroundImage: `url(${spaceshipTexture})`,
+            backgroundRepeat: 'repeat',
+            backgroundSize: '200px 200px',
+            padding: '12px',
+          }}
+        >
+          {/* Top: Right Panel (Radar Chart) */}
+          <div className="flex-1 min-h-0 flex flex-col justify-start">
             <AnimatePresence mode="wait">
-              <motion.div key={currentNode?.id || 'root'} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 pointer-events-none">
-                <div className="absolute inset-0 pointer-events-auto">
-                  {/* Panels */}
-                  {(currentNode?.type === 'big_genre' || currentNode?.type === 'sub_genre') && (
-                <>
-                  <LeftPanel type="genre" title={`${currentNode.name} (${currentNode.type === 'big_genre' ? '대분류' : '세부 장르'})`}
-                    keyArtists={(currentNode.type === 'big_genre' ? cachedGenres.get(currentNode.id)?.top_tracks : currentNode.topTracks)?.slice(0, 4).map(t => exploreTab === 'song' ? `"${t.name}" by ${parseArtists(t.artists)}` : parseArtists(t.artists))}
+              <motion.div 
+                key={currentNode?.id || 'root'} 
+                initial={{ opacity: 0, x: 20 }} 
+                animate={{ opacity: 1, x: 0 }} 
+                exit={{ opacity: 0, x: 20 }} 
+                className="h-full w-full"
+              >
+                {(currentNode?.type === 'big_genre' || currentNode?.type === 'sub_genre') && currentNode.audioFeatures ? (
+                  <RightPanel title={`${currentNode.name} 특성`} subtitle="장르 평균 분석" features={currentNode.audioFeatures} />
+                ) : currentNode?.type === 'song' && currentNode.audioFeatures ? (
+                  <RightPanel title="곡 오디오 분석" subtitle={currentNode.trackSnapshot!.name}
+                    features={allGenresMeta.find(g => g.name === currentNode.parentGenre)?.average_audio_features || {}}
+                    compareFeatures={currentNode.audioFeatures}
                   />
-                  {currentNode.audioFeatures && (
-                    <RightPanel title={`${currentNode.name} - Average Audio Features`} subtitle="Genre Avg" features={currentNode.audioFeatures} />
-                  )}
-                </>
-              )}
-
-              {currentNode?.type === 'song' && currentNode.trackSnapshot && (
-                <>
-                  <LeftPanel
-                    type="track"
-                    title={currentNode.trackSnapshot.name}
-                    subtitle={currentNode.trackSnapshot.artists}
-                    trackInfo={currentNode.trackSnapshot}
-                    isSpotifyLoggedIn={spotifyLoggedIn}
-                    isLiked={isTrackLiked}
-                    onLike={handleLikeTrack}
-                    onAddToPlaylist={handleAddToPlaylist}
-                  />
-                  {currentNode.audioFeatures && (
-                    <RightPanel title="Selected Track Audio Features" subtitle={currentNode.trackSnapshot.name}
-                      features={allGenresMeta.find(g => g.name === currentNode.parentGenre)?.average_audio_features || {}}
-                      compareFeatures={currentNode.audioFeatures}
-                    />
-                  )}
-                </>
-              )}
-
-                  {mode === 'tuned' && !currentNode && (
-                    <TunedExplorePanel onExplore={(features) => {
-                      setCurrentNode({ id: 'ship', type: 'spaceship', name: '', x: 50, y: 50 });
-                    }} />
-                  )}
-                </div>
+                ) : (
+                  allGenresMeta.length > 0 && (
+                    <RightPanel title={`${allGenresMeta[0].name} 특성`} subtitle="탐험대기 장르 가이드" features={allGenresMeta[0].average_audio_features} />
+                  )
+                )}
               </motion.div>
             </AnimatePresence>
-          </>
-        )}
-      </main>
-
-      {/* Minimap Log */}
-      {mode !== 'home' && (
-        <div className="absolute bottom-4 right-4 z-30">
-          <div className="bg-[#111]/90 backdrop-blur-md border border-white/10 p-3 rounded-xl shadow-2xl">
-            <div className="text-[10px] text-white/50 mb-2 font-mono tracking-widest">DBDIGGING LOG</div>
-            <Minimap />
           </div>
+
+          {/* Bottom: DBDIGGING LOG */}
+          <GlassPanel className="w-full h-[25vh] min-h-[160px] text-white">
+            <div className="flex-1 min-h-0 w-full p-2 flex flex-col">
+              <div className="text-[10px] text-[#00FFFF] mb-1 font-mono tracking-widest uppercase">DBDIGGING LOG</div>
+              <div className="flex-1 min-h-0 overflow-hidden relative">
+                <Minimap />
+              </div>
+            </div>
+          </GlassPanel>
         </div>
       )}
+
+      {/* Row 3: Bottom Console Frame */}
+      <footer 
+        className="relative z-20 select-none border-t border-white/10"
+        style={{
+          gridRow: '3',
+          gridColumn: '1 / span 3',
+          backgroundImage: `url(${spaceshipTexture})`,
+          backgroundRepeat: 'repeat',
+          backgroundSize: '200px 200px',
+        }}
+      />
 
       {/* Playlist Modal */}
       {showPlaylistModal && playlistTargetTrack && (
         <PlaylistModal
           trackId={playlistTargetTrack.id}
           trackName={playlistTargetTrack.name}
+          spotifyLoggedIn={spotifyLoggedIn}
           onClose={() => { setShowPlaylistModal(false); setPlaylistTargetTrack(null); }}
         />
       )}

@@ -51,9 +51,26 @@ setInterval(getSpotifyToken, 1000 * 60 * 50);
  */
 app.get('/api/track/:id', async (req, res) => {
   try {
-    const response = await axios.get(`https://api.spotify.com/v1/tracks/${req.params.id}`, {
-      headers: { 'Authorization': `Bearer ${accessToken}` }
-    });
+    if (!accessToken) {
+      await getSpotifyToken();
+    }
+
+    let response;
+    try {
+      response = await axios.get(`https://api.spotify.com/v1/tracks/${req.params.id}`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+    } catch (err) {
+      if (err.response && (err.response.status === 401 || err.response.status === 403)) {
+        console.log('🔄 Token expired or invalid for track API. Refreshing token...');
+        await getSpotifyToken();
+        response = await axios.get(`https://api.spotify.com/v1/tracks/${req.params.id}`, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+      } else {
+        throw err;
+      }
+    }
 
     const trackInfo = {
       name: response.data.name,
@@ -65,7 +82,7 @@ app.get('/api/track/:id', async (req, res) => {
 
     res.json(trackInfo);
   } catch (error) {
-    console.error("❌ Track Fetch Error:", error.message);
+    console.error("❌ Track Fetch Error:", error.response ? error.response.data : error.message);
     res.status(500).json({ error: "Track not found or API error" });
   }
 });
@@ -75,9 +92,26 @@ app.get('/api/track/:id', async (req, res) => {
  */
 app.get('/api/artist/:id', async (req, res) => {
   try {
-    const response = await axios.get(`https://api.spotify.com/v1/artists/${req.params.id}`, {
-      headers: { 'Authorization': `Bearer ${accessToken}` }
-    });
+    if (!accessToken) {
+      await getSpotifyToken();
+    }
+
+    let response;
+    try {
+      response = await axios.get(`https://api.spotify.com/v1/artists/${req.params.id}`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+    } catch (err) {
+      if (err.response && (err.response.status === 401 || err.response.status === 403)) {
+        console.log('🔄 Token expired or invalid for artist API. Refreshing token...');
+        await getSpotifyToken();
+        response = await axios.get(`https://api.spotify.com/v1/artists/${req.params.id}`, {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+      } else {
+        throw err;
+      }
+    }
 
     res.json({
       name: response.data.name,
@@ -87,7 +121,7 @@ app.get('/api/artist/:id', async (req, res) => {
       external_url: response.data.external_urls.spotify
     });
   } catch (error) {
-    console.error("❌ Artist Fetch Error:", error.message);
+    console.error("❌ Artist Fetch Error:", error.response ? error.response.data : error.message);
     res.status(500).json({ error: "Artist not found or API error" });
   }
 });

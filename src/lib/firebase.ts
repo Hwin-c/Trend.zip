@@ -121,7 +121,7 @@ export const fetchTracksByGenre = async (genreName: string, maxLimit: number = 2
       limit(maxLimit)
     );
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Track));
+    return snapshot.docs.map(doc => ({ track_id: doc.id, ...doc.data() } as any as Track));
   } catch (error) {
     console.error(`Error fetching tracks for genre ${genreName}:`, error);
     return [];
