@@ -939,9 +939,11 @@ function MainApp() {
           <div className="flex items-center gap-2 text-sm text-white/50 font-mono">
             {mode !== 'home' && (
               <>
-                <button onClick={resetToHome} className="hover:text-white transition-colors uppercase">ROOT</button>
+                <button onClick={resetToHome} className="hover:text-white transition-colors uppercase">시작</button>
                 <span>&gt;</span>
-                <button onClick={() => { setCurrentNode(null); setDeepTracks([]); }} className="hover:text-white transition-colors uppercase">{mode}</button>
+                <button onClick={() => { setCurrentNode(null); setDeepTracks([]); }} className="hover:text-white transition-colors uppercase">
+                  {mode === 'explore' ? '탐색' : mode}
+                </button>
               </>
             )}
             {currentNode && currentNode.type !== 'spaceship' && (

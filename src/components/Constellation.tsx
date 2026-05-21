@@ -138,10 +138,10 @@ export const Constellation: React.FC<ConstellationProps> = ({ nodes, centerNode,
       const scaledDance = 0.08 + rawDanceRatio * 0.84;
       const scaledEnergy = 0.08 + rawEnergyRatio * 0.84;
 
-      // X: Danceability rank ratio (0 ~ 1) => (scaledDance - 0.5) * (dimensions.width * 0.85)
-      // Y: Energy rank ratio (0 ~ 1) => (0.5 - scaledEnergy) * (dimensions.height * 0.8)
-      let fx = (scaledDance - 0.5) * (dimensions.width * 0.85);
-      let fy = (0.5 - scaledEnergy) * (dimensions.height * 0.8);
+      // X: Danceability rank ratio (0 ~ 1) => (scaledDance - 0.5) * (dimensions.width * 0.45)
+      // Y: Energy rank ratio (0 ~ 1) => (0.5 - scaledEnergy) * (dimensions.height * 0.45)
+      let fx = (scaledDance - 0.5) * (dimensions.width * 0.45);
+      let fy = (0.5 - scaledEnergy) * (dimensions.height * 0.45);
 
       // Deterministic Jitter based on ID hash to prevent direct overlapping
       let hash = 0;
@@ -168,8 +168,11 @@ export const Constellation: React.FC<ConstellationProps> = ({ nodes, centerNode,
       let fx = coords.fx;
       let fy = coords.fy;
       
-      // In explore view, do not pin big genres directly so forceCollide can push them apart and prevent overlap!
+      // Explore 최상위 은하계 화면에서 대장르(주요 항성)들은 매번 동일한 배치 및 모양 유지를 위해 Pin 고정
       let shouldPin = !isExploring;
+      if (isExploring && n.type === 'big_genre') {
+        shouldPin = true;
+      }
 
       // 세부 장르 상세 뷰(centerNode.type === 'sub_genre') 지향성 배치 정책
       if (centerNode && centerNode.type === 'sub_genre') {
@@ -275,11 +278,11 @@ export const Constellation: React.FC<ConstellationProps> = ({ nodes, centerNode,
     if (!fgRef.current) return;
     const fg = fgRef.current;
 
-    // 대장르/세부장르 고정핀을 유지하면서 수록곡들이 겹침 없이 수려하게 유영하도록 상시 물리 엔진 셋팅
-    fg.d3Force('charge', forceManyBody().strength(-900));
+    // 대장르/세부장르 고정핀을 유지하면서 수록곡들이 촘촘하고 수려하게 유영하도록 상시 물리 엔진 셋팅
+    fg.d3Force('charge', forceManyBody().strength(-350));
     
     fg.d3Force('collide', forceCollide()
-      .radius((node: any) => (node.name ? node.name.length * 6 : 10) + 25)
+      .radius((node: any) => (node.name ? node.name.length * 3.5 : 8) + 12)
       .iterations(3)
     );
     
@@ -294,9 +297,9 @@ export const Constellation: React.FC<ConstellationProps> = ({ nodes, centerNode,
     if (linkForce) {
       linkForce
         .distance((link: any) => {
-          if (link.isStructural) return 200; // Structural constellation lines between big genres
-          if (link.isOrbit) return 120;      // Orbit lines to sub-genres
-          return 100;
+          if (link.isStructural) return 100; // Structural constellation lines between big genres
+          if (link.isOrbit) return 65;       // Orbit lines to sub-genres
+          return 50;
         })
         .strength(0.08); // Make it very gentle
     }
