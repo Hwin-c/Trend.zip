@@ -264,6 +264,81 @@ app.get('/api/artist/:id', async (req, res) => {
   }
 });
 
+// 실시간 대한민국 인기 차트 캐싱 및 프록시 API
+let trendingCache = null;
+let trendingCacheTime = 0;
+
+/**
+ * Spotify 플레이리스트 URL 또는 ID에서 22자리 고유 식별자만 추출합니다.
+ */
+function extractPlaylistId(urlOrId) {
+  if (!urlOrId) return '3i51Pj9TZKrH2waJP8NRM5';
+  
+  const cleanInput = String(urlOrId).trim();
+  
+  // 1. URL 패턴 매칭 (예: https://open.spotify.com/playlist/3i51Pj9TZKrH2waJP8NRM5?si=...)
+  const match = cleanInput.match(/\/playlist\/([a-zA-Z0-9]{22})/);
+  if (match) {
+    return match[1];
+  }
+  
+  // 2. 쿼리 파라미터 분리 및 정밀 22자리 검증
+  const cleanId = cleanInput.split('?')[0].trim();
+  if (/^[a-zA-Z0-9]{22}$/.test(cleanId)) {
+    return cleanId;
+  }
+  
+  return cleanId;
+}
+
+app.get('/api/trending', async (req, res) => {
+  const now = Date.now();
+  // 1시간 캐싱 적용
+  if (trendingCache && (now - trendingCacheTime < 1000 * 60 * 60)) {
+    return res.json(trendingCache);
+  }
+
+  const rawPlaylistTarget = process.env.SPOTIFY_PLAYLIST_URL || process.env.VITE_SPOTIFY_PLAYLIST_URL || '3i51Pj9TZKrH2waJP8NRM5';
+  const playlistId = extractPlaylistId(rawPlaylistTarget);
+
+  console.log(`🌌 [Backend Proxy] Loading playlist ID: ${playlistId} (source: ${rawPlaylistTarget})`);
+
+  try {
+    const response = await spotifyGet(`https://api.spotify.com/v1/playlists/${playlistId}`);
+    if (response && response.data && response.data.tracks && response.data.tracks.items) {
+      const tracks = response.data.tracks.items.map((item, idx) => {
+        if (!item.track) return null;
+        return {
+          rank: idx + 1,
+          track_id: item.track.id,
+          name: item.track.name,
+          artists: item.track.artists ? item.track.artists.map(a => a.name) : ["Unknown Artist"],
+          album_name: item.track.album ? item.track.album.name : "Unknown Album",
+          album_cover: item.track.album && item.track.album.images && item.track.album.images[0] ? item.track.album.images[0].url : "",
+          duration_ms: item.track.duration_ms || 0,
+          popularity: item.track.popularity || 0
+        };
+      }).filter(Boolean);
+      
+      trendingCache = tracks;
+      trendingCacheTime = now;
+      return res.json(tracks);
+    }
+    throw new Error("Invalid response format from Spotify playlist API");
+  } catch (error) {
+    console.error("❌ Trending Fetch Error:", error.response ? error.response.data : error.message);
+    if (trendingCache) {
+      console.warn("⚠️ Using expired trending cache as fallback.");
+      return res.json(trendingCache);
+    }
+    res.status(502).json({ 
+      error: "Bad Gateway", 
+      message: "Failed to connect to Spotify Playlist API",
+      details: error.response ? error.response.data : error.message 
+    });
+  }
+});
+
 app.get('/', (req, res) => {
   res.send('🌌 DBdigging Backend Server is Running!');
 });

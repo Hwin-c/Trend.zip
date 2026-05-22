@@ -14,7 +14,7 @@ import { RightPanel } from './components/RightPanel';
 import { SearchDropdown } from './components/SearchDropdown';
 import { PlaylistModal } from './components/PlaylistModal';
 import { loginWithSpotify, handleSpotifyCallback, isLoggedIn, logout, getSpotifyProfile } from './lib/spotifyAuth';
-import { fetchTrackFromSpotify, fetchTracksFromSpotify, saveTrack, removeSavedTrack, checkSavedTrack } from './lib/spotify';
+import { fetchTrackFromSpotify, fetchTracksFromSpotify, saveTrack, removeSavedTrack, checkSavedTrack, extractPlaylistId } from './lib/spotify';
 import { parseArtists, isValidUrl } from './lib/utils';
 import { GlassPanel } from './components/GlassPanel';
 import spaceshipTexture from './assets/spaceship_texture.webp';
@@ -48,6 +48,8 @@ function MainApp() {
   const { addToLog, clearLog } = useDigging();
 
   const [homeTrending, setHomeTrending] = useState<TrackSnapshot[]>([]);
+  const [chartViewMode, setChartViewMode] = useState<'list' | 'player'>('list');
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const [allGenresMeta, setAllGenresMeta] = useState<Pick<ParentGenre, 'id' | 'name' | 'average_audio_features'>[]>([]);
   const [cachedGenres, setCachedGenres] = useState<Map<string, ParentGenre>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
@@ -566,10 +568,20 @@ function MainApp() {
   };
 
   const startExploreMode = (tab: 'genre' | 'song') => {
-    setMode('explore');
-    setExploreTab(tab);
-    setCurrentNode(null);
-    setDeepTracks([]);
+    setIsTransitioning(true);
+    
+    // Delay actual exploration cockpit mounting to match the hyperdrive blast peak (0.8s)
+    setTimeout(() => {
+      setMode('explore');
+      setExploreTab(tab);
+      setCurrentNode(null);
+      setDeepTracks([]);
+    }, 800);
+
+    // End transition overlay and allow interactions after 1.8s
+    setTimeout(() => {
+      setIsTransitioning(false);
+    }, 1800);
   };
 
   const handleDeepDive = async () => {
@@ -966,7 +978,10 @@ function MainApp() {
       }}
     >
       {/* Row 1: Top HUD & Header */}
-      <header 
+      <motion.header 
+        initial={mode === 'home' ? false : { y: -80, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ type: 'spring', stiffness: 80, damping: 15, delay: 0.1 }}
         className="relative z-30 flex items-center justify-between px-8 box-border select-none border-b border-white/10"
         style={{
           gridRow: '1',
@@ -1043,11 +1058,14 @@ function MainApp() {
             </button>
           </div>
         </div>
-      </header>
+      </motion.header>
 
       {/* Row 2, Column 1: Left Panel Zone */}
       {mode !== 'home' && (
-        <div 
+        <motion.div 
+          initial={{ x: -380, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 70, damping: 14 }}
           className="relative flex flex-col justify-start min-h-0 border-r border-white/10"
           style={{
             gridRow: '2',
@@ -1088,7 +1106,7 @@ function MainApp() {
               />
             </motion.div>
           </AnimatePresence>
-        </div>
+        </motion.div>
       )}
 
       {/* Row 2, Column 2: Center Space Window */}
@@ -1102,15 +1120,67 @@ function MainApp() {
           backgroundPosition: 'center',
         }}
       >
-        {/* D3 Constellation Star Map */}
-        <Constellation
-          nodes={displayNodes}
-          centerNode={currentNode || undefined}
-          onNodeClick={handleNodeClick}
-          activeNodeId={currentNode?.id}
-          onPositionsSettled={handlePositionsSettled}
-          showSubGenres={showSubGenres}
-        />
+        {/* Glassmorphic Background Blur Layer (Behind Constellation) when mode === 'explore' */}
+        {mode === 'explore' && (
+          <div 
+            className="absolute inset-0 z-0 pointer-events-none"
+            style={{
+              backgroundColor: 'rgba(0, 0, 0, 0.4)',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+            }}
+          />
+        )}
+
+        {/* D3 Constellation Star Map wrapped in interactive z-indexed container */}
+        <div className="relative z-[5] w-full h-full flex items-center justify-center pointer-events-auto">
+          <Constellation
+            nodes={displayNodes}
+            centerNode={currentNode || undefined}
+            onNodeClick={handleNodeClick}
+            activeNodeId={currentNode?.id}
+            onPositionsSettled={handlePositionsSettled}
+            showSubGenres={showSubGenres}
+          />
+        </div>
+
+        {/* Cockpit Glass Window HUD Overlay (when mode === 'explore') */}
+        {mode === 'explore' && (
+          <div 
+            className="absolute inset-0 z-10 pointer-events-none border border-[#00FFFF]/30 rounded-[24px] overflow-hidden shadow-[inset_0_0_80px_rgba(0,0,0,0.85)]"
+          >
+            {/* Glass shine diagonal line */}
+            <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/[0.035] to-transparent" />
+            
+            {/* HUD Corner Reticles / Grid Guide Lines (Center Radar Removed for clear star constellation visibility) */}
+            <div className="absolute inset-4 border border-[#00FFFF]/10 rounded-[16px]">
+              {/* Corner brackets */}
+              <div className="absolute top-4 left-4 w-6 h-6 border-t-2 border-l-2 border-[#00FFFF]/30 rounded-tl" />
+              <div className="absolute top-4 right-4 w-6 h-6 border-t-2 border-r-2 border-[#00FFFF]/30 rounded-tr" />
+              <div className="absolute bottom-4 left-4 w-6 h-6 border-b-2 border-l-2 border-[#00FFFF]/30 rounded-bl" />
+              <div className="absolute bottom-4 right-4 w-6 h-6 border-b-2 border-r-2 border-[#00FFFF]/30 rounded-br" />
+
+              {/* Cockpit HUD indicators */}
+              <div className="absolute top-6 left-8 font-mono text-[9px] text-[#00FFFF]/60 tracking-wider leading-relaxed">
+                SYS: ACTIVE<br />
+                NAV: CONSTELLATION_MAP
+              </div>
+              <div className="absolute top-6 right-8 font-mono text-[9px] text-[#00FFFF]/60 tracking-wider text-right leading-relaxed">
+                RADAR: 360° RANGE<br />
+                SIG: CONNECTED
+              </div>
+              <div className="absolute bottom-6 left-8 font-mono text-[9px] text-[#B026FF]/60 tracking-wider leading-relaxed">
+                DEEP DIVE: STANDBY<br />
+                HULL: 100%
+              </div>
+              <div className="absolute bottom-6 right-8 font-mono text-[9px] text-[#B026FF]/60 tracking-wider text-right leading-relaxed">
+                AUTO-DECODE: ON<br />
+                COCKPIT MODE
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 웰컴/홈 오버레이 뷰 (mode === 'home') */}
         {mode === 'home' && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-between py-6 pointer-events-none bg-black/35 backdrop-blur-[2px]">
@@ -1126,52 +1196,26 @@ function MainApp() {
             </div>
 
             {/* Trending Section Overlay inside central view */}
-            <div className="w-full max-w-5xl px-8 pointer-events-auto mb-[2vh]">
+            <div className="w-full max-w-4xl px-8 pointer-events-auto mb-[2vh]">
               <div className="flex items-center gap-3 mb-3 justify-between">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-bold tracking-widest text-[#00FFFF] font-mono uppercase">인기 트렌딩 디깅 트랙</h3>
-                  <span className="px-2 py-0.5 bg-[#B026FF]/30 border border-[#B026FF]/50 rounded-full text-[9px] text-white/90 animate-pulse">Trending</span>
+                  <h3 className="text-sm font-bold tracking-widest text-[#00FFFF] font-mono uppercase">인기 곡 - 대한민국 (Top Songs - South Korea)</h3>
+                  <span className="px-2 py-0.5 bg-[#1DB954]/30 border border-[#1DB954]/50 rounded-full text-[9px] text-[#1DB954] animate-pulse">LIVE CHART</span>
                 </div>
-                <span className="text-[10px] text-white/40 font-mono hidden sm:inline">← 마우스 휠을 굴려 가로로 스크롤하세요 →</span>
               </div>
               
-              <div 
-                onWheel={handleWheelScroll}
-                className="flex gap-4 overflow-x-auto pb-3 snap-x snap-mandatory max-w-full custom-scrollbar scroll-smooth"
-              >
-                {homeTrending.slice(0, 10).map((track, i) => (
-                  <div 
-                    key={i} 
-                    onClick={() => handleSearchSelectTrack(track, 'Trending')}
-                    className="min-w-[160px] max-w-[160px] bg-black/60 rounded-xl p-3 border border-white/5 flex flex-col backdrop-blur-md snap-start cursor-pointer hover:border-[#00FFFF]/30 hover:bg-black/80 hover:scale-[1.03] transition-all duration-300 group shrink-0"
-                  >
-                    <div className="w-full aspect-square bg-[#111] rounded-lg mb-2 overflow-hidden border border-white/10 relative">
-                      {track.album_cover ? (
-                        <img src={track.album_cover} alt={track.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                      ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-[#1A0B2E] to-[#0A0518]">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-[#B026FF]/50 animate-pulse mb-1">
-                            <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
-                          </svg>
-                          <span className="text-[8px] text-white/20 font-mono uppercase">Hologram</span>
-                        </div>
-                      )}
-                      <div className="absolute inset-0 bg-[#00FFFF]/10 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
-                    </div>
-                    <div className="text-[12px] text-white font-bold truncate group-hover:text-[#00FFFF] transition-colors leading-tight mb-0.5">{track.name}</div>
-                    <div className="text-[10px] text-white/50 truncate mb-2">{parseArtists(track.artists)}</div>
-                    
-                    <div className="mt-auto">
-                      <div className="flex items-center justify-between text-[9px] text-white/60 mb-1">
-                        <span>⚡ Energy</span>
-                        <span className="font-mono text-[#00FFFF] font-semibold">{(track.energy || track.features?.energy || 0.5).toFixed(2)}</span>
-                      </div>
-                      <div className="w-full bg-white/10 h-1 rounded-full overflow-hidden">
-                        <div className="bg-gradient-to-r from-[#00FFFF] to-[#B026FF] h-full rounded-full transition-all duration-500" style={{ width: `${(track.energy || track.features?.energy || 0.5) * 100}%` }} />
-                      </div>
-                    </div>
-                  </div>
-                ))}
+              <div className="w-full rounded-2xl overflow-hidden border border-[#00FFFF]/20 shadow-[0_0_30px_rgba(0,255,255,0.15)] bg-black/60 backdrop-blur-md transition-all duration-300 hover:border-[#00FFFF]/40 hover:shadow-[0_0_40px_rgba(0,255,255,0.25)]">
+                <iframe 
+                  data-testid="embed-iframe" 
+                  style={{ borderRadius: '16px' }} 
+                  src={`https://open.spotify.com/embed/playlist/${extractPlaylistId(import.meta.env.VITE_SPOTIFY_PLAYLIST_URL)}?utm_source=generator`}
+                  width="100%" 
+                  height="540" 
+                  frameBorder="0" 
+                  allowFullScreen={true} 
+                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" 
+                  loading="lazy"
+                />
               </div>
             </div>
           </div>
@@ -1180,7 +1224,10 @@ function MainApp() {
 
       {/* Row 2, Column 3: Right Panel Zone (Radar Chart & DBDIGGING LOG) */}
       {mode !== 'home' && (
-        <div 
+        <motion.div 
+          initial={{ x: 320, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 70, damping: 14 }}
           className="relative flex flex-col justify-between gap-y-3 min-h-0 border-l border-white/10"
           style={{
             gridRow: '2',
@@ -1253,11 +1300,14 @@ function MainApp() {
               </div>
             </div>
           </GlassPanel>
-        </div>
+        </motion.div>
       )}
 
       {/* Row 3: Bottom Console Frame */}
-      <footer 
+      <motion.footer 
+        initial={mode === 'home' ? false : { y: 80, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ type: 'spring', stiffness: 70, damping: 14, delay: 0.15 }}
         className="relative z-20 select-none border-t border-white/10"
         style={{
           gridRow: '3',
@@ -1311,6 +1361,35 @@ function MainApp() {
               </svg>
             )}
             <span className="text-xs font-medium tracking-wide">{toastMessage}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Immersive Camera Zoom Transition Overlay */}
+      <AnimatePresence>
+        {isTransitioning && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ 
+              opacity: [0, 1, 1, 0],
+              scale: [0.98, 1.08, 1.15]
+            }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 1.8, ease: "easeInOut" }}
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[3px] pointer-events-none flex items-center justify-center"
+          >
+            {/* Subtle, premium HUD vignette ring that expands and fades */}
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ 
+                scale: [0.9, 1.2, 1.4],
+                opacity: [0, 0.35, 0] 
+              }}
+              transition={{ duration: 1.5, ease: "easeOut" }}
+              className="absolute w-[40vw] h-[40vw] max-w-[400px] max-h-[400px] rounded-full border border-[#00FFFF]/20 flex items-center justify-center shadow-[0_0_50px_rgba(0,255,255,0.05)]"
+            >
+              <div className="w-[80%] h-[80%] rounded-full border border-dashed border-[#B026FF]/10" />
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

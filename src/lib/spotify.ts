@@ -273,6 +273,97 @@ export async function fetchTracksFromSpotify(trackIds: string[]): Promise<Record
   return finalResult;
 }
 
+export interface LiveTrendingTrack {
+  rank: number;
+  track_id: string;
+  name: string;
+  artists: string[];
+  album_name: string;
+  album_cover: string;
+  duration_ms: number;
+  popularity: number;
+}
+
+/**
+ * Spotify 플레이리스트 URL 또는 ID에서 22자리 고유 식별자만 추출합니다.
+ */
+export function extractPlaylistId(urlOrId: string | null | undefined): string {
+  if (!urlOrId) return '3i51Pj9TZKrH2waJP8NRM5';
+  
+  const cleanInput = urlOrId.trim();
+  
+  // 1. URL 패턴 매칭 (예: https://open.spotify.com/playlist/3i51Pj9TZKrH2waJP8NRM5?si=...)
+  const match = cleanInput.match(/\/playlist\/([a-zA-Z0-9]{22})/);
+  if (match) {
+    return match[1];
+  }
+  
+  // 2. 쿼리 파라미터 분리 및 정밀 22자리 검증
+  const cleanId = cleanInput.split('?')[0].trim();
+  if (/^[a-zA-Z0-9]{22}$/.test(cleanId)) {
+    return cleanId;
+  }
+  
+  return cleanId;
+}
+
+/**
+ * 하이브리드 방식으로 실시간 대한민국 인기 차트(Top Songs - South Korea)를 가져옵니다.
+ * 로그인 상태: 브라우저에서 직접 Spotify API를 연동
+ * 비로그인/에러 상태: 백엔드 캐싱 프록시 API(/api/trending)로 폴백
+ */
+export async function getLiveTrendingChart(): Promise<LiveTrendingTrack[]> {
+  const userToken = getAccessToken();
+  const rawPlaylistTarget = import.meta.env.VITE_SPOTIFY_PLAYLIST_URL || '3i51Pj9TZKrH2waJP8NRM5';
+  const playlistId = extractPlaylistId(rawPlaylistTarget);
+  
+  if (userToken) {
+    try {
+      console.log(`🌌 [Client Direct] Fetching playlist ID: ${playlistId} directly from Spotify (source: ${rawPlaylistTarget})...`);
+      const response = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}`, {
+        headers: {
+          Authorization: `Bearer ${userToken}`,
+        },
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.tracks && data.tracks.items) {
+          return data.tracks.items.map((item: any, idx: number) => {
+            if (!item.track) return null;
+            return {
+              rank: idx + 1,
+              track_id: item.track.id,
+              name: item.track.name,
+              artists: item.track.artists ? item.track.artists.map((a: any) => a.name) : ['Unknown Artist'],
+              album_name: item.track.album ? item.track.album.name : 'Unknown Album',
+              album_cover: item.track.album && item.track.album.images && item.track.album.images[0] ? item.track.album.images[0].url : '',
+              duration_ms: item.track.duration_ms || 0,
+              popularity: item.track.popularity || 0
+            };
+          }).filter(Boolean);
+        }
+      }
+      console.warn('Direct Playlist Fetch failed or returned invalid format. Falling back to backend proxy.');
+    } catch (err) {
+      console.error('Failed to fetch directly from Spotify Playlist API:', err);
+    }
+  }
+
+  // 비로그인 혹은 직접 페치 실패 시 백엔드 프록시 이용
+  try {
+    console.log('🌌 [Backend Proxy] Fetching South Korea Top 50 Chart via server...');
+    const res = await fetch(`${SERVER_URL}/api/trending`);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (error) {
+    console.error('Failed to fetch trending chart from proxy:', error);
+  }
+
+  return [];
+}
+
 // --- Phase 4: User-scoped API calls (requires PKCE login) ---
 
 async function spotifyFetch(url: string, options: RequestInit = {}): Promise<Response> {

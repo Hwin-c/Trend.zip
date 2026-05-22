@@ -85,6 +85,13 @@ export async function handleSpotifyCallback(): Promise<string | null> {
 
   if (!code || !verifier) return null;
 
+  // Consume the verifier immediately to prevent duplicate token exchange requests in React Strict Mode double-mounting
+  localStorage.removeItem(VERIFIER_KEY);
+
+  // Clean the URL immediately (remove ?code=... from address bar) to prevent subsequent hook triggers
+  const cleanUrl = window.location.pathname + window.location.hash;
+  window.history.replaceState({}, document.title, cleanUrl);
+
   try {
     const res = await fetch('https://accounts.spotify.com/api/token', {
       method: 'POST',
@@ -103,10 +110,6 @@ export async function handleSpotifyCallback(): Promise<string | null> {
     if (data.access_token) {
       localStorage.setItem(TOKEN_KEY, data.access_token);
       localStorage.setItem(TOKEN_EXPIRY_KEY, String(Date.now() + data.expires_in * 1000));
-      localStorage.removeItem(VERIFIER_KEY);
-
-      // Clean the URL (remove ?code=... from address bar)
-      window.history.replaceState({}, document.title, '/');
 
       return data.access_token;
     }
