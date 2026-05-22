@@ -37,6 +37,53 @@ interface LeftPanelProps {
 }
 
 // 6가지 오디오 특성을 기반으로 인라인 SVG 레이더 차트(육각형)를 그리는 초경량 컴포넌트
+const NeonPlaceholder: React.FC<{ name: string; artists?: string | string[]; size?: 'sm' | 'md' | 'lg' }> = ({ name, artists, size = 'md' }) => {
+  let hash = 0;
+  const combined = name + (typeof artists === 'string' ? artists : (artists?.join('') || ''));
+  for (let i = 0; i < combined.length; i++) {
+    hash = combined.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % 4;
+
+  const themes = [
+    { bg: 'bg-gradient-to-br from-cyan-500/20 to-blue-950/30', text: 'text-[#00FFFF]', border: 'border-[#00FFFF]/20 shadow-[0_0_10px_rgba(0,255,255,0.15)]' },
+    { bg: 'bg-gradient-to-br from-pink-500/20 to-purple-950/30', text: 'text-[#F472B6]', border: 'border-[#F472B6]/20 shadow-[0_0_10px_rgba(244,114,182,0.15)]' },
+    { bg: 'bg-gradient-to-br from-rose-500/20 to-orange-950/30', text: 'text-[#FB7185]', border: 'border-[#FB7185]/20 shadow-[0_0_10px_rgba(251,113,133,0.15)]' },
+    { bg: 'bg-gradient-to-br from-emerald-500/20 to-teal-950/30', text: 'text-[#34D399]', border: 'border-[#34D399]/20 shadow-[0_0_10px_rgba(52,211,153,0.15)]' }
+  ];
+  
+  const theme = themes[index];
+  const initial = name.trim().charAt(0).toUpperCase() || '♪';
+
+  let sizeClasses = '';
+  let textClasses = '';
+  if (size === 'lg') {
+    sizeClasses = 'w-full h-full rounded-xl aspect-square';
+    textClasses = 'text-5xl font-mono tracking-widest';
+  } else if (size === 'md') {
+    sizeClasses = 'w-8 h-8 rounded-lg';
+    textClasses = 'text-sm font-mono font-bold';
+  } else {
+    sizeClasses = 'w-7 h-7 rounded-lg';
+    textClasses = 'text-xs font-mono font-bold';
+  }
+
+  return (
+    <div className={`flex items-center justify-center shrink-0 border relative overflow-hidden transition-all duration-300 ${sizeClasses} ${theme.bg} ${theme.border}`}>
+      <div className="absolute inset-0 bg-white/[0.01] backdrop-blur-[0.5px]" />
+      <div className="absolute -top-1/2 -left-1/2 w-full h-full bg-white/5 rounded-full filter blur-md animate-pulse" />
+      <span className={`relative z-10 font-bold select-none ${theme.text} ${textClasses}`}>
+        {initial}
+      </span>
+      <div className="absolute bottom-1 left-0 right-0 flex justify-center gap-0.5 opacity-20">
+        <span className="w-[1.5px] h-1.5 bg-white rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+        <span className="w-[1.5px] h-2.5 bg-white rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
+        <span className="w-[1.5px] h-1 bg-white rounded-full animate-bounce" style={{ animationDelay: '0.5s' }} />
+      </div>
+    </div>
+  );
+};
+
 const MiniHexagon: React.FC<{ features?: AudioFeatures; itemType: 'big_genre' | 'sub_genre' | 'song' }> = ({ features, itemType }) => {
   if (!features) return null;
 
@@ -205,11 +252,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
                           <img src={item.albumCover} alt={item.name} className="w-full h-full object-cover" />
                         </div>
                       ) : (
-                        <div className="w-8 h-8 rounded-lg bg-white/[0.04] flex items-center justify-center shrink-0 border border-white/10 animate-pulse text-[#00FFFF]/40">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-bounce">
-                            <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
-                          </svg>
-                        </div>
+                        <NeonPlaceholder name={item.name} artists={item.artists} size="md" />
                       )
                     ) : (
                       // 장르의 경우: 앨범 이미지와 상관없이 항상 동그라미 숫자 표기
@@ -253,15 +296,11 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
             <div className="text-[10px] text-[#00FFFF] mb-1 font-mono tracking-widest uppercase">TRACK ARCHIVE</div>
             
             {/* 앨범 자켓 */}
-            <div className="w-full aspect-square rounded-xl bg-[#222] mb-3 overflow-hidden border border-white/5 relative group">
-              {isValidUrl(trackInfo?.album_cover) ? (
-                <img src={trackInfo.album_cover} alt={title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+            <div className="w-full aspect-square rounded-xl bg-[#222] mb-3 overflow-hidden border border-white/5 relative group flex items-center justify-center">
+              {isValidUrl(trackInfo?.album_cover || (trackInfo as any)?.album_art) ? (
+                <img src={trackInfo.album_cover || (trackInfo as any)?.album_art} alt={title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
               ) : (
-                <div className="w-full h-full flex items-center justify-center bg-white/5 animate-pulse">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="text-white/15">
-                    <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>
-                  </svg>
-                </div>
+                <NeonPlaceholder name={title} artists={subtitle} size="lg" />
               )}
             </div>
 
@@ -331,11 +370,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
                           <img src={item.albumCover} alt={item.name} className="w-full h-full object-cover" />
                         </div>
                       ) : (
-                        <div className="w-7 h-7 rounded-lg bg-white/[0.04] flex items-center justify-center shrink-0 border border-white/10 animate-pulse text-[#00FFFF]/40">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-bounce">
-                            <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
-                          </svg>
-                        </div>
+                        <NeonPlaceholder name={item.name} artists={item.artists} size="sm" />
                       )}
                       
                       <div className="min-w-0 flex-1">

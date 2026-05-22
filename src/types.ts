@@ -77,6 +77,7 @@ export interface NodeData {
   audioFeatures?: AudioFeatures;
   childrenGenres?: string[];
   parentGenre?: string;
+  subGenre?: string;
   topTracks?: TrackSnapshot[];
   similarTracks?: TrackSnapshot[];
   trackSnapshot?: TrackSnapshot;

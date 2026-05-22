@@ -6,8 +6,11 @@ const getRedirectUri = (): string => {
   const origin = window.location.origin;
   const hostname = window.location.hostname;
   
-  // 로컬 개발 환경(localhost/127.0.0.1)에서는 대시보드에 등록된 http://127.0.0.1:3000 에 강제 매핑
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+  // 로컬 개발 환경에서 접속한 주소(localhost 또는 127.0.0.1) 그대로 매핑을 유지
+  if (hostname === 'localhost') {
+    return 'http://localhost:3000';
+  }
+  if (hostname === '127.0.0.1') {
     return 'http://127.0.0.1:3000';
   }
   // 파이어베이스 운영 배포 서버 환경 (끝 슬래시 포함 형태 유지)
@@ -16,6 +19,8 @@ const getRedirectUri = (): string => {
 
 const REDIRECT_URI = getRedirectUri();
 const SCOPES = [
+  'user-read-private',
+  'user-read-email',
   'user-library-read',
   'user-library-modify',
   'playlist-read-private',

@@ -10,6 +10,7 @@ interface ConstellationProps {
   activeNodeId?: string;
   /** Callback when node positions have settled after simulation */
   onPositionsSettled?: (positions: Map<string, { x: number; y: number }>) => void;
+  showSubGenres?: boolean;
 }
 
 // Helper to draw a literal 5-pointed star
@@ -36,7 +37,7 @@ const draw5PointStar = (ctx: CanvasRenderingContext2D, cx: number, cy: number, o
   ctx.closePath();
 };
 
-export const Constellation: React.FC<ConstellationProps> = ({ nodes, centerNode, onNodeClick, activeNodeId, onPositionsSettled }) => {
+export const Constellation: React.FC<ConstellationProps> = ({ nodes, centerNode, onNodeClick, activeNodeId, onPositionsSettled, showSubGenres }) => {
   const fgRef = useRef<any>();
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
@@ -138,10 +139,11 @@ export const Constellation: React.FC<ConstellationProps> = ({ nodes, centerNode,
       const scaledDance = 0.08 + rawDanceRatio * 0.84;
       const scaledEnergy = 0.08 + rawEnergyRatio * 0.84;
 
-      // X: Danceability rank ratio (0 ~ 1) => (scaledDance - 0.5) * (dimensions.width * 0.45)
-      // Y: Energy rank ratio (0 ~ 1) => (0.5 - scaledEnergy) * (dimensions.height * 0.45)
-      let fx = (scaledDance - 0.5) * (dimensions.width * 0.45);
-      let fy = (0.5 - scaledEnergy) * (dimensions.height * 0.45);
+      // 별들을 화면 중앙 근처로 모으기 위해 scaleFactorX/Y 축소 (가깝게 배치하여 카메라 줌을 확대하도록 유도)
+      const scaleFactorX = centerNode ? 0.35 : (showSubGenres ? 0.85 : 0.45);
+      const scaleFactorY = centerNode ? 0.18 : (showSubGenres ? 0.45 : 0.35);
+      let fx = (scaledDance - 0.5) * (dimensions.width * scaleFactorX);
+      let fy = (0.5 - scaledEnergy) * (dimensions.height * scaleFactorY);
 
       // Deterministic Jitter based on ID hash to prevent direct overlapping
       let hash = 0;
@@ -174,31 +176,70 @@ export const Constellation: React.FC<ConstellationProps> = ({ nodes, centerNode,
         shouldPin = true;
       }
 
-      // 세부 장르 상세 뷰(centerNode.type === 'sub_genre') 지향성 배치 정책
+      // 세부 장르 상세 뷰(centerNode.type === 'sub_genre') 결정론적 고정 배치 정책 (도식 기반 부채꼴)
       if (centerNode && centerNode.type === 'sub_genre') {
+        const hubId = centerNode.id;
+        const activeX = -dimensions.width * 0.12;
+        const activeY = dimensions.height * 0.04;
+
         if (n.type === 'big_genre') {
-          // 대장르는 왼쪽 상단 고정
-          fx = -dimensions.width / 4;
-          fy = -dimensions.height / 4;
+          // 장르는 왼쪽 상단 고정 (Y축 격차를 좁힘)
+          fx = -dimensions.width * 0.12;
+          fy = -dimensions.height * 0.12;
+          shouldPin = true;
+        } else if (n.id === hubId) {
+          // 세부 장르(소장르)는 왼쪽 중하단 고정
+          fx = activeX;
+          fy = activeY;
+          shouldPin = true;
+        } else if (n.type === 'song' && n.id !== hubId) {
+          // 수록곡들은 허브 노드를 중심으로 우측 부채꼴 모양으로 완전 고정 (거리를 360px -> 160px로 대폭 좁힘)
+          const children = nodes.filter(node => node.type === 'song' && node.id !== hubId);
+          const index = children.findIndex(node => node.id === n.id);
+          if (index !== -1) {
+            const angle = -Math.PI * 0.17 + (index / Math.max(1, children.length - 1)) * (Math.PI * 0.34);
+            const distance = 160;
+            fx = activeX + Math.cos(angle) * distance;
+            fy = activeY + Math.sin(angle) * distance;
+            shouldPin = true;
+          }
+        }
+      }
+
+      // 곡 상세 뷰(centerNode.type === 'song') 결정론적 고정 배치 정책 (도식 기반 부채꼴)
+      if (centerNode && centerNode.type === 'song') {
+        const activeX = -dimensions.width * 0.12;
+        const activeY = dimensions.height * 0.04;
+
+        if (n.type === 'big_genre') {
+          // 장르(대장르)는 왼쪽 상단 고정
+          fx = -dimensions.width * 0.12;
+          fy = -dimensions.height * 0.12;
           shouldPin = true;
         } else if (n.type === 'sub_genre') {
-          // 세부 장르는 왼쪽 중반 고정
-          fx = -dimensions.width / 4;
-          fy = 0;
+          // 세부장르(하위 장르)는 왼쪽 중앙 고정 (허브 위치)
+          fx = activeX;
+          fy = activeY;
           shouldPin = true;
         } else if (n.type === 'song') {
-          // 노래들은 중앙 및 우측에 자유 유영하도록 고정 해제
-          fx = undefined as any;
-          fy = undefined as any;
-          shouldPin = false;
+          // 현재 곡 및 모든 수록곡 노드는 하위 장르 허브를 중심으로 우측 부채꼴 정렬 (물리 거리를 430px -> 200px로 대폭 좁힘)
+          const children = nodes.filter(node => node.type === 'song');
+          const index = children.findIndex(node => node.id === n.id);
+          if (index !== -1) {
+            const angle = -Math.PI * 0.17 + (index / Math.max(1, children.length - 1)) * (Math.PI * 0.34);
+            const distance = 200;
+            fx = activeX + Math.cos(angle) * distance;
+            fy = activeY + Math.sin(angle) * distance;
+            shouldPin = true;
+          }
         }
       }
 
       // 대분류 장르 상세 뷰(centerNode.type === 'big_genre') 지향성 배치 정책
       if (centerNode && centerNode.type === 'big_genre') {
         if (n.type === 'big_genre') {
-          // 대장르는 왼쪽 중앙 끝 고정
-          fx = -dimensions.width / 3;
+          // 대장르는 왼쪽 중앙부 고정 (거리를 가깝게 조정)
+          fx = -dimensions.width * 0.14;
           fy = 0;
           shouldPin = true;
         } else if (n.type === 'sub_genre') {
@@ -212,7 +253,10 @@ export const Constellation: React.FC<ConstellationProps> = ({ nodes, centerNode,
       // 초기 유영 시작 지점을 중앙 및 우측 영역으로 유도
       let initialX = coords.fx;
       let initialY = coords.fy;
-      if (centerNode && centerNode.type === 'sub_genre' && n.type === 'song') {
+      if (shouldPin) {
+        initialX = fx;
+        initialY = fy;
+      } else if (centerNode && centerNode.type === 'sub_genre' && n.type === 'song') {
         initialX = dimensions.width / 8 + (Math.random() - 0.2) * (dimensions.width / 3);
         initialY = (Math.random() - 0.5) * (dimensions.height / 2);
       } else if (centerNode && centerNode.type === 'big_genre' && n.type === 'sub_genre') {
@@ -235,11 +279,33 @@ export const Constellation: React.FC<ConstellationProps> = ({ nodes, centerNode,
     const fgLinks: any[] = [];
 
     if (centerNode) {
-      fgNodes.forEach(n => {
-        if (n.id !== centerNode.id) {
-          fgLinks.push({ source: centerNode.id, target: n.id, isStructural: false });
+      if (centerNode.type === 'song') {
+        const bigGenreNode = fgNodes.find(n => n.type === 'big_genre');
+        const subGenreNode = fgNodes.find(n => n.type === 'sub_genre');
+        const songNodes = fgNodes.filter(n => n.type === 'song');
+
+        if (bigGenreNode && subGenreNode) {
+          // 대장르 -> 하위 장르 1대1 연결선
+          fgLinks.push({ source: bigGenreNode.id, target: subGenreNode.id, isStructural: false });
+          // 하위 장르 허브 -> 모든 곡 노드 부채꼴 연결선
+          songNodes.forEach(sNode => {
+            fgLinks.push({ source: subGenreNode.id, target: sNode.id, isStructural: false });
+          });
+        } else {
+          // 폴백: 성게 모양 링크
+          fgNodes.forEach(n => {
+            if (n.id !== centerNode.id) {
+              fgLinks.push({ source: centerNode.id, target: n.id, isStructural: false });
+            }
+          });
         }
-      });
+      } else {
+        fgNodes.forEach(n => {
+          if (n.id !== centerNode.id) {
+            fgLinks.push({ source: centerNode.id, target: n.id, isStructural: false });
+          }
+        });
+      }
     } else {
       // Root Explore View constellation layout mapping
       const bigGenres = fgNodes.filter(n => n.type === 'big_genre');
@@ -278,37 +344,51 @@ export const Constellation: React.FC<ConstellationProps> = ({ nodes, centerNode,
     if (!fgRef.current) return;
     const fg = fgRef.current;
 
-    // 대장르/세부장르 고정핀을 유지하면서 수록곡들이 촘촘하고 수려하게 유영하도록 상시 물리 엔진 셋팅
-    fg.d3Force('charge', forceManyBody().strength(-350));
+    // 대장르/세부장르 고정핀을 유지하면서 수록곡들이 옹기종기 미려하게 모이도록 상시 물리 엔진 셋팅
+    const chargeStrength = centerNode ? -300 : (showSubGenres ? -1000 : -350);
+    fg.d3Force('charge', forceManyBody().strength(chargeStrength));
     
     fg.d3Force('collide', forceCollide()
-      .radius((node: any) => (node.name ? node.name.length * 3.5 : 8) + 12)
+      .radius((node: any) => {
+        const baseRadius = node.name ? node.name.length * (showSubGenres ? 4.5 : 3.5) : 8;
+        const extraOffset = centerNode ? 22 : (showSubGenres ? 20 : 12);
+        return baseRadius + extraOffset;
+      })
       .iterations(3)
     );
     
     fg.d3Force('center', forceCenter(0, 0));
 
     // Pull unpinned nodes gently to their ideal audio-feature-based coordinates
+    // X축은 넓게 흐르도록 strength를 0.08로 부드럽게 설정하고, Y축은 위아래 퍼짐 방지를 위해 strength를 0.18로 강력히 당깁니다.
     fg.d3Force('x', forceX((node: any) => node.fx_ideal || 0).strength(0.08));
-    fg.d3Force('y', forceY((node: any) => node.fy_ideal || 0).strength(0.08));
+    fg.d3Force('y', forceY((node: any) => node.fy_ideal || 0).strength(0.18));
 
     // Customize the link force to prevent constellation lines from collapsing nodes into tight clusters
     const linkForce = fg.d3Force('link');
     if (linkForce) {
       linkForce
         .distance((link: any) => {
-          if (link.isStructural) return 100; // Structural constellation lines between big genres
-          if (link.isOrbit) return 65;       // Orbit lines to sub-genres
-          return 50;
+          if (link.isStructural) return showSubGenres ? 250 : 150; // Structural constellation lines between big genres
+          if (link.isOrbit) return showSubGenres ? 180 : 100;       // Orbit lines to sub-genres
+          
+          if (centerNode) {
+            if (centerNode.type === 'big_genre') return 130; // 대장르 상세 뷰에서 옹기종기 모이도록 축소 (280 -> 130)
+            if (centerNode.type === 'sub_genre') return 160; // 세부장르 상세 뷰 (360 -> 160)
+            if (centerNode.type === 'song') return 200;      // 곡 상세 뷰 (430 -> 200)
+          }
+          return 100;
         })
         .strength(0.08); // Make it very gentle
     }
     
-    // Canvas Boundary Clamping Force
-    const margin = 50;
+    // Canvas Boundary Clamping Force (상세 뷰에서는 좌우(X축)를 1.8배 광활하게 열어주되, 위아래(Y축)는 엄격하게 제어하여 축소 방지)
+    const margin = 100;
     const boxForce = () => {
-      const halfW = dimensions.width / 2 - margin;
-      const halfH = dimensions.height / 2 - margin;
+      const spaceMultiplierX = centerNode ? 1.8 : 1.0;
+      const spaceMultiplierY = centerNode ? 1.1 : 1.0;
+      const halfW = (dimensions.width * spaceMultiplierX) / 2 - margin;
+      const halfH = (dimensions.height * spaceMultiplierY) / 2 - margin;
       graphData.nodes.forEach((node: any) => {
         node.x = Math.max(-halfW, Math.min(halfW, node.x));
         node.y = Math.max(-halfH, Math.min(halfH, node.y));
@@ -317,7 +397,7 @@ export const Constellation: React.FC<ConstellationProps> = ({ nodes, centerNode,
     fg.d3Force('box', boxForce);
     
     fg.d3ReheatSimulation();
-  }, [graphData, dimensions]);
+  }, [graphData, dimensions, showSubGenres]);
 
   // Custom Canvas Rendering — stars with fade-in glow
   const drawNode = useCallback((node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
@@ -325,7 +405,7 @@ export const Constellation: React.FC<ConstellationProps> = ({ nodes, centerNode,
     const isActive = node.id === activeNodeId;
     const isHovered = node.id === hoverNode;
     const isCenter = centerNode && node.id === centerNode.id;
-    const isBig = node.type === 'big_genre' || isCenter;
+    const isBig = node.type === 'big_genre' || isCenter || node.type === 'sub_genre';
 
     // Fade-in based on _birthTime
     let fadeAlpha = 1;
@@ -334,9 +414,25 @@ export const Constellation: React.FC<ConstellationProps> = ({ nodes, centerNode,
       fadeAlpha = Math.min(elapsed / 1500, 1); // 1.5s fade-in
     }
 
-    // Radius logic
-    const baseOuterRadius = isBig ? 6 : 3.5;
-    const baseInnerRadius = isBig ? 2.5 : 1.4;
+    // Radius logic based on type and importance to establish visual hierarchy
+    let baseOuterRadius = 3.5;
+    let baseInnerRadius = 1.4;
+
+    if (node.type === 'big_genre') {
+      baseOuterRadius = 8;
+      baseInnerRadius = 3.2;
+    } else if (node.type === 'sub_genre') {
+      baseOuterRadius = 5.5;
+      baseInnerRadius = 2.2;
+    } else if (node.type === 'song') {
+      if (isCenter) {
+        baseOuterRadius = 5;
+        baseInnerRadius = 2;
+      } else {
+        baseOuterRadius = 3.5;
+        baseInnerRadius = 1.4;
+      }
+    }
 
     // Twinkling effect — slow and subtle
     const time = Date.now();
@@ -482,7 +578,16 @@ export const Constellation: React.FC<ConstellationProps> = ({ nodes, centerNode,
         cooldownTicks={0}
         onEngineStop={() => {
           if (fgRef.current) {
-            fgRef.current.zoomToFit(400, 50);
+            if (centerNode) {
+              // 상세 화면에서는 zoomToFit을 호출하면 노드들을 뷰포트 한가운데로 구겨넣으므로,
+              // 우리가 고안한 수려한 오프셋 고정 레이아웃이 있는 그대로 왼쪽에 드러나도록 줌 레벨과 카메라 위치를 고정합니다. (옹기종기 모인 노드들에 맞춰 1.75로 대폭 확대)
+              fgRef.current.centerAt(0, 0, 400);
+              fgRef.current.zoom(1.75, 400);
+            } else {
+              // 루트 은하계 탐색 화면에서는 기존처럼 전체 노드가 한눈에 들어오도록 피팅합니다.
+              fgRef.current.zoomToFit(400, 50);
+            }
+
             if (onPositionsSettled && !settledReportedRef.current) {
               settledReportedRef.current = true;
               const positions = new Map<string, { x: number; y: number }>();

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { DiggingLogEntry, NodeType } from './types';
 import { auth, saveLogToFirestore } from './lib/firebase';
 import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
@@ -40,7 +40,7 @@ export const DiggingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, []);
 
-  const login = async () => {
+  const login = useCallback(async () => {
     if (auth) {
       const provider = new GoogleAuthProvider();
       try {
@@ -49,15 +49,15 @@ export const DiggingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         console.error("Login failed", error);
       }
     }
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     if (auth) {
       await signOut(auth);
     }
-  };
+  }, []);
 
-  const addToLog = (nodeId: string, nodeName: string, nodeType: NodeType) => {
+  const addToLog = useCallback((nodeId: string, nodeName: string, nodeType: NodeType) => {
     setLog(prev => {
       if (prev.length > 0 && prev[prev.length - 1].nodeId === nodeId) {
         return prev;
@@ -73,14 +73,14 @@ export const DiggingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       localStorage.setItem('local_digging_log', JSON.stringify(newLog));
       return newLog;
     });
-  };
+  }, []);
 
-  const clearLog = () => {
+  const clearLog = useCallback(() => {
     setLog([]);
     localStorage.removeItem('local_digging_log');
-  };
+  }, []);
 
-  const saveLog = async () => {
+  const saveLog = useCallback(async () => {
     if (!user) {
       alert("Please login to save your digging log.");
       return;
@@ -91,7 +91,7 @@ export const DiggingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
     await saveLogToFirestore(user.uid, log);
     alert("당신만의 별자리가 저장되었습니다.");
-  };
+  }, [user, log]);
 
   return (
     <DiggingContext.Provider value={{ log, addToLog, clearLog, user, login, logout, saveLog }}>

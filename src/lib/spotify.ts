@@ -3,6 +3,8 @@
 // Phase 4: Like, playlists via user token (login required)
 
 import { getAccessToken } from './spotifyAuth';
+import { db } from './firebase';
+import { doc, getDoc, collection, getDocs, query, where, documentId } from 'firebase/firestore';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:10000';
 
@@ -20,7 +22,6 @@ export async function fetchTrackFromSpotify(trackId: string): Promise<SpotifyTra
   const cleanTrackId = trackId.replace('spotify:track:', '');
 
   // Tier 1: If browser has a valid Spotify User Access Token, perform direct client-side fetch.
-  // This achieves zero backend dependency, maximum speed, and 100% reliable loading.
   const userToken = getAccessToken();
   if (userToken) {
     try {
@@ -39,21 +40,237 @@ export async function fetchTrackFromSpotify(trackId: string): Promise<SpotifyTra
           external_url: data.external_urls.spotify,
         };
       }
-      console.warn('Spotify Direct Fetch failed (Access token likely expired or invalid). Falling back to server proxy.');
+      console.warn('Spotify Direct Fetch failed. Falling back to server proxy.');
     } catch (directError) {
       console.error('Failed to fetch directly from Spotify API:', directError);
     }
   }
 
-  // Tier 2 Fallback: If not logged in or direct API fetch failed, request via the backend proxy server.
+  // Tier 2 Fallback: Request via the backend proxy server.
   try {
     const res = await fetch(`${SERVER_URL}/api/track/${cleanTrackId}`);
-    if (!res.ok) return null;
-    return res.json();
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.album_art && data.album_art.length > 5) {
+        return data;
+      }
+    }
   } catch (error) {
     console.error('Failed to fetch track from Spotify proxy server:', error);
-    return null;
   }
+
+  // [Ultra Shield Tier 3] Spotify API & Proxy both failed (e.g. 429 Rate Limit / 403 Forbidden)
+  // Retrieve the original album cover and info directly from Firestore DB in 0.01s!
+  try {
+    console.log(`🌌 [Ultra Shield] Recovering track ${cleanTrackId} directly from Firestore DB...`);
+    const trackDocRef = doc(db, 'tracks', cleanTrackId);
+    const trackDocSnap = await getDoc(trackDocRef);
+    if (trackDocSnap.exists()) {
+      const dbData = trackDocSnap.data();
+      
+      let parsedArtists: string[] = ['Unknown Artist'];
+      const rawArtists = dbData.artists || '';
+      if (rawArtists) {
+        try {
+          const cleaned = rawArtists.replace(/'/g, '"');
+          const arr = JSON.parse(cleaned);
+          if (Array.isArray(arr)) parsedArtists = arr;
+        } catch {
+          parsedArtists = [rawArtists.replace(/[\[\]']/g, '').trim()];
+        }
+      }
+
+      return {
+        name: dbData.name || 'Unknown Track',
+        preview_url: dbData.preview_url || null,
+        album_art: dbData.album_cover || dbData.album_art || '',
+        artists: parsedArtists,
+        external_url: `https://open.spotify.com/track/${cleanTrackId}`
+      };
+    }
+  } catch (dbError) {
+    console.error('Failed to fallback to Firestore track recovery:', dbError);
+  }
+
+  return null;
+}
+
+export async function fetchTracksFromSpotify(trackIds: string[]): Promise<Record<string, SpotifyTrackInfo>> {
+  if (!trackIds || trackIds.length === 0) return {};
+
+  const cleanIds = trackIds.map(id => id.replace('spotify:track:', ''));
+  const result: Record<string, SpotifyTrackInfo> = {};
+  const missingIds: string[] = [];
+
+  // Tier 1: If browser has a valid Spotify User Access Token, perform direct client-side fetch.
+  const userToken = getAccessToken();
+  if (userToken) {
+    const directFetch = async (idsChunk: string[], attempt = 1): Promise<any> => {
+      try {
+        const response = await fetch(`https://api.spotify.com/v1/tracks?ids=${idsChunk.join(',')}`, {
+          headers: {
+            Authorization: `Bearer ${userToken}`,
+          },
+        });
+
+        if (response.ok) {
+          return await response.json();
+        }
+
+        if (response.status === 429 && attempt <= 2) {
+          const retryAfter = parseInt(response.headers.get('Retry-After') || '2', 10);
+          console.warn(`⚠️ [Client Direct] Spotify API 429 Rate Limit. Retry-After: ${retryAfter} seconds. Waiting...`);
+          await new Promise(resolve => setTimeout(resolve, (retryAfter * 1000) + 100));
+          return directFetch(idsChunk, attempt + 1);
+        }
+
+        throw new Error(`Direct batch fetch status: ${response.status}`);
+      } catch (err) {
+        console.error('Direct batch fetch failed:', err);
+        return null;
+      }
+    };
+
+    try {
+      const chunks: string[][] = [];
+      for (let i = 0; i < cleanIds.length; i += 50) {
+        chunks.push(cleanIds.slice(i, i + 50));
+      }
+
+      for (const chunk of chunks) {
+        const data = await directFetch(chunk);
+        if (data && data.tracks) {
+          data.tracks.forEach((track: any, index: number) => {
+            const requestedId = chunk[index];
+            if (track) {
+              result[requestedId] = {
+                name: track.name,
+                preview_url: track.preview_url,
+                album_art: track.album.images[0]?.url || '',
+                artists: track.artists.map((a: any) => a.name),
+                external_url: track.external_urls.spotify,
+              };
+            }
+          });
+        } else {
+          missingIds.push(...chunk);
+        }
+      }
+
+      if (Object.keys(result).length === cleanIds.length) {
+        const finalResult: Record<string, SpotifyTrackInfo> = {};
+        for (const [id, info] of Object.entries(result)) {
+          finalResult[id] = info;
+          finalResult[`spotify:track:${id}`] = info;
+        }
+        return finalResult;
+      }
+    } catch (err) {
+      console.error('Failed to direct fetch batch, falling back to proxy:', err);
+    }
+  }
+
+  // Tier 2 Fallback: Fetch via Backend Proxy
+  const proxyIds = cleanIds.filter(id => !result[id]);
+  if (proxyIds.length > 0) {
+    try {
+      const chunks: string[][] = [];
+      for (let i = 0; i < proxyIds.length; i += 50) {
+        chunks.push(proxyIds.slice(i, i + 50));
+      }
+
+      for (const chunk of chunks) {
+        const res = await fetch(`${SERVER_URL}/api/tracks?ids=${chunk.join(',')}`);
+        if (res.ok) {
+          const data = await res.json();
+          Object.assign(result, data);
+        } else {
+          chunk.forEach(id => {
+            result[id] = {
+              name: 'Rate Limited/Error Track',
+              preview_url: null,
+              album_art: '',
+              artists: ['Spotify API'],
+              external_url: '#',
+            };
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch batch tracks from Spotify proxy server:', error);
+    }
+  }
+
+  // [Ultra Shield Tier 3] For any tracks that failed or returned empty album arts due to Spotify blockages,
+  // perform a bulk Firestore DB query to retrieve original album covers and metadata directly!
+  const finalMissingIds = cleanIds.filter(id => {
+    const item = result[id];
+    return !item || !item.album_art || item.album_art === '';
+  });
+
+  if (finalMissingIds.length > 0) {
+    try {
+      console.log(`🌌 [Ultra Shield Batch] Recovering ${finalMissingIds.length} tracks directly from Firestore DB...`);
+      const chunks: string[][] = [];
+      for (let i = 0; i < finalMissingIds.length; i += 30) {
+        chunks.push(finalMissingIds.slice(i, i + 30));
+      }
+
+      for (const chunk of chunks) {
+        const tracksRef = collection(db, 'tracks');
+        const q = query(tracksRef, where(documentId(), 'in', chunk));
+        const qSnap = await getDocs(q);
+
+        qSnap.docs.forEach(docSnap => {
+          const dbData = docSnap.data();
+          const tid = docSnap.id;
+          
+          let parsedArtists: string[] = ['Unknown Artist'];
+          const rawArtists = dbData.artists || '';
+          if (rawArtists) {
+            try {
+              const cleaned = rawArtists.replace(/'/g, '"');
+              const arr = JSON.parse(cleaned);
+              if (Array.isArray(arr)) parsedArtists = arr;
+            } catch {
+              parsedArtists = [rawArtists.replace(/[\[\]']/g, '').trim()];
+            }
+          }
+
+          result[tid] = {
+            name: dbData.name || 'Unknown Track',
+            preview_url: dbData.preview_url || null,
+            album_art: dbData.album_cover || dbData.album_art || '',
+            artists: parsedArtists,
+            external_url: `https://open.spotify.com/track/${tid}`
+          };
+        });
+      }
+    } catch (dbError) {
+      console.error('Failed to bulk recover tracks from Firestore:', dbError);
+    }
+  }
+
+  // Fallback for remaining completely unresolved items
+  cleanIds.forEach(id => {
+    if (!result[id]) {
+      result[id] = {
+        name: 'Unknown Track',
+        preview_url: null,
+        album_art: '',
+        artists: ['Unknown Artist'],
+        external_url: '#',
+      };
+    }
+  });
+
+  const finalResult: Record<string, SpotifyTrackInfo> = {};
+  for (const [id, info] of Object.entries(result)) {
+    finalResult[id] = info;
+    finalResult[`spotify:track:${id}`] = info;
+  }
+
+  return finalResult;
 }
 
 // --- Phase 4: User-scoped API calls (requires PKCE login) ---

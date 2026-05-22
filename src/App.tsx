@@ -14,7 +14,7 @@ import { RightPanel } from './components/RightPanel';
 import { SearchDropdown } from './components/SearchDropdown';
 import { PlaylistModal } from './components/PlaylistModal';
 import { loginWithSpotify, handleSpotifyCallback, isLoggedIn, logout, getSpotifyProfile } from './lib/spotifyAuth';
-import { fetchTrackFromSpotify, saveTrack, removeSavedTrack, checkSavedTrack } from './lib/spotify';
+import { fetchTrackFromSpotify, fetchTracksFromSpotify, saveTrack, removeSavedTrack, checkSavedTrack } from './lib/spotify';
 import { parseArtists, isValidUrl } from './lib/utils';
 import { GlassPanel } from './components/GlassPanel';
 import spaceshipTexture from './assets/spaceship_texture.webp';
@@ -303,11 +303,17 @@ function MainApp() {
   const handleSearchSelectTrack = (track: TrackSnapshot, parentGenreName: string) => {
     setMode('explore');
     setExploreTab('song');
-    setCurrentNode({
-      id: track.track_id, type: 'song', name: track.name,
-      x: 50, y: 50,
-      trackSnapshot: track, audioFeatures: track.features, parentGenre: parentGenreName
-    });
+    const node: NodeData = {
+      id: track.track_id,
+      type: 'song',
+      name: track.name,
+      x: 50,
+      y: 50,
+      trackSnapshot: track,
+      audioFeatures: track.features,
+      parentGenre: parentGenreName
+    };
+    handleNodeClick(node);
     setSearchQuery('');
   };
 
@@ -366,31 +372,34 @@ function MainApp() {
       // 대장르 top_tracks 앨범 자켓 비동기 로드 복원 루프
       if (fullGenre && fullGenre.top_tracks) {
         const targetGenreId = node.id;
-        fullGenre.top_tracks.forEach((track, index) => {
+        const tracksToFetch = fullGenre.top_tracks.filter(track => {
           const hasCover = isValidUrl(track.album_cover) || isValidUrl((track as any).album_art);
-          if (!hasCover && !pendingFetches.current.has(track.track_id)) {
-            pendingFetches.current.add(track.track_id);
-            fetchTrackFromSpotify(track.track_id).then(info => {
-              if (info?.album_art) {
-                setCachedGenres(prev => {
-                  const next = new Map(prev);
-                  const genre = next.get(targetGenreId) as ParentGenre | undefined;
-                  if (genre && genre.top_tracks && genre.top_tracks[index]) {
-                    const updatedTracks = [...genre.top_tracks];
-                    updatedTracks[index] = { 
-                      ...updatedTracks[index], 
-                      album_cover: info.album_art 
-                    };
-                    next.set(targetGenreId, { ...genre, top_tracks: updatedTracks } as ParentGenre);
-                  }
-                  return next;
-                });
-              }
-            }).finally(() => {
-              pendingFetches.current.delete(track.track_id);
-            });
-          }
+          return !hasCover && !pendingFetches.current.has(track.track_id);
         });
+
+        if (tracksToFetch.length > 0) {
+          tracksToFetch.forEach(t => pendingFetches.current.add(t.track_id));
+          
+          fetchTracksFromSpotify(tracksToFetch.map(t => t.track_id)).then(trackInfoMap => {
+            setCachedGenres(prev => {
+              const next = new Map(prev);
+              const genre = next.get(targetGenreId) as ParentGenre | undefined;
+              if (genre && genre.top_tracks) {
+                const updatedTracks = genre.top_tracks.map(track => {
+                  const info = trackInfoMap[track.track_id];
+                  if (info?.album_art) {
+                    return { ...track, album_cover: info.album_art };
+                  }
+                  return track;
+                });
+                next.set(targetGenreId, { ...genre, top_tracks: updatedTracks } as ParentGenre);
+              }
+              return next;
+            });
+          }).finally(() => {
+            tracksToFetch.forEach(t => pendingFetches.current.delete(t.track_id));
+          });
+        }
       }
     }
 
@@ -411,25 +420,30 @@ function MainApp() {
       node = { ...node, topTracks: mapped };
 
       // Async visual cover restoration loop for sub_genre tracks
-      mapped.forEach((track, index) => {
-        if (!isValidUrl(track.album_cover) && !pendingFetches.current.has(track.track_id)) {
-          pendingFetches.current.add(track.track_id);
-          fetchTrackFromSpotify(track.track_id).then(info => {
-            if (info?.album_art) {
-              setCurrentNode(prev => {
-                if (!prev || prev.id !== node.id || prev.type !== 'sub_genre') return prev;
-                const updatedTracks = [...(prev.topTracks || [])];
-                if (updatedTracks[index]) {
-                  updatedTracks[index] = { ...updatedTracks[index], album_cover: info.album_art };
-                }
-                return { ...prev, topTracks: updatedTracks };
-              });
-            }
-          }).finally(() => {
-            pendingFetches.current.delete(track.track_id);
-          });
-        }
+      const subGenreTracksToFetch = mapped.filter(track => {
+        return !isValidUrl(track.album_cover) && !pendingFetches.current.has(track.track_id);
       });
+
+      if (subGenreTracksToFetch.length > 0) {
+        const currentNodeId = node.id;
+        subGenreTracksToFetch.forEach(t => pendingFetches.current.add(t.track_id));
+
+        fetchTracksFromSpotify(subGenreTracksToFetch.map(t => t.track_id)).then(trackInfoMap => {
+          setCurrentNode(prev => {
+            if (!prev || prev.id !== currentNodeId || prev.type !== 'sub_genre') return prev;
+            const updatedTracks = (prev.topTracks || []).map(track => {
+              const info = trackInfoMap[track.track_id];
+              if (info?.album_art) {
+                return { ...track, album_cover: info.album_art };
+              }
+              return track;
+            });
+            return { ...prev, topTracks: updatedTracks };
+          });
+        }).finally(() => {
+          subGenreTracksToFetch.forEach(t => pendingFetches.current.delete(t.track_id));
+        });
+      }
     }
 
     // Fetch similar tracks dynamically from Firestore for song nodes
@@ -477,34 +491,49 @@ function MainApp() {
               .filter(t => t.track_id !== trackSnap.track_id)
               .slice(0, 5);
               
-            const updatedNode = { 
-              ...node, 
-              similarTracks: filtered,
-              parentGenre: parentGenreName || node.parentGenre
-            };
-            
-            setCurrentNode(updatedNode);
+            setCurrentNode(prev => {
+              if (!prev || prev.id !== node.id) return prev;
+              
+              // Preserve already-restored album_cover data from Spotify async fetch
+              const currentCover = prev.trackSnapshot?.album_cover || node.trackSnapshot?.album_cover;
+              
+              return {
+                ...prev,
+                similarTracks: filtered,
+                parentGenre: parentGenreName || prev.parentGenre,
+                subGenre: primaryGenre || prev.subGenre,
+                trackSnapshot: prev.trackSnapshot ? {
+                  ...prev.trackSnapshot,
+                  album_cover: currentCover
+                } : prev.trackSnapshot
+              };
+            });
             
             // Async cover restoration loop for similar tracks
-            filtered.forEach((track, index) => {
-              if (!isValidUrl(track.album_cover) && !pendingFetches.current.has(track.track_id)) {
-                pendingFetches.current.add(track.track_id);
-                fetchTrackFromSpotify(track.track_id).then(info => {
-                  if (info?.album_art) {
-                    setCurrentNode(prev => {
-                      if (!prev || prev.id !== node.id || prev.type !== 'song') return prev;
-                      const updatedSimilar = [...(prev.similarTracks || [])];
-                      if (updatedSimilar[index]) {
-                        updatedSimilar[index] = { ...updatedSimilar[index], album_cover: info.album_art };
-                      }
-                      return { ...prev, similarTracks: updatedSimilar };
-                    });
-                  }
-                }).finally(() => {
-                  pendingFetches.current.delete(track.track_id);
-                });
-              }
+            const similarTracksToFetch = filtered.filter(track => {
+              return !isValidUrl(track.album_cover) && !pendingFetches.current.has(track.track_id);
             });
+
+            if (similarTracksToFetch.length > 0) {
+              const currentNodeId = node.id;
+              similarTracksToFetch.forEach(t => pendingFetches.current.add(t.track_id));
+
+              fetchTracksFromSpotify(similarTracksToFetch.map(t => t.track_id)).then(trackInfoMap => {
+                setCurrentNode(prev => {
+                  if (!prev || prev.id !== currentNodeId || prev.type !== 'song') return prev;
+                  const updatedSimilar = (prev.similarTracks || []).map(track => {
+                    const info = trackInfoMap[track.track_id];
+                    if (info?.album_art) {
+                      return { ...track, album_cover: info.album_art };
+                    }
+                    return track;
+                  });
+                  return { ...prev, similarTracks: updatedSimilar };
+                });
+              }).finally(() => {
+                similarTracksToFetch.forEach(t => pendingFetches.current.delete(t.track_id));
+              });
+            }
           }
         } catch (error) {
           console.error("Error loading similar tracks from Firestore:", error);
@@ -560,25 +589,27 @@ function MainApp() {
     setDeepTracks(prev => [...prev, ...mappedTracks]);
 
     // Async restoration loop for deep tracks
-    mappedTracks.forEach((track) => {
-      if (!isValidUrl(track.album_cover) && !pendingFetches.current.has(track.track_id)) {
-        pendingFetches.current.add(track.track_id);
-        fetchTrackFromSpotify(track.track_id).then(info => {
-          if (info?.album_art) {
-            setDeepTracks(prev => {
-              const updated = [...prev];
-              const idx = updated.findIndex(u => u.track_id === track.track_id);
-              if (idx !== -1) {
-                updated[idx] = { ...updated[idx], album_cover: info.album_art };
-              }
-              return updated;
-            });
-          }
-        }).finally(() => {
-          pendingFetches.current.delete(track.track_id);
-        });
-      }
+    const deepTracksToFetch = mappedTracks.filter(track => {
+      return !isValidUrl(track.album_cover) && !pendingFetches.current.has(track.track_id);
     });
+
+    if (deepTracksToFetch.length > 0) {
+      deepTracksToFetch.forEach(t => pendingFetches.current.add(t.track_id));
+
+      fetchTracksFromSpotify(deepTracksToFetch.map(t => t.track_id)).then(trackInfoMap => {
+        setDeepTracks(prev => {
+          return prev.map(track => {
+            const info = trackInfoMap[track.track_id];
+            if (info?.album_art) {
+              return { ...track, album_cover: info.album_art };
+            }
+            return track;
+          });
+        });
+      }).finally(() => {
+        deepTracksToFetch.forEach(t => pendingFetches.current.delete(t.track_id));
+      });
+    }
 
     setIsDeepDiving(false);
   };
@@ -710,39 +741,51 @@ function MainApp() {
           x: 0, 
           y: 0,
           trackSnapshot: currentNode.trackSnapshot,
-          audioFeatures: currentNode.audioFeatures
+          audioFeatures: currentNode.audioFeatures,
+          parentGenre: currentNode.parentGenre,
+          subGenre: currentNode.subGenre
         }
       ];
 
-      // 1. 대장르 메타데이터 노드 추가
       const parentGenreName = currentNode.parentGenre || 'Genre';
+      
+      // 실제 대장르 ID 찾기 (allGenresMeta 매칭)
+      const actualGenreMeta = allGenresMeta.find(g => g.name.toLowerCase() === parentGenreName.toLowerCase());
+      const actualGenreId = actualGenreMeta ? actualGenreMeta.id : 'g1';
+
+      // 1. 대장르 메타데이터 노드 추가
       nodes.push({
-        id: 'g1',
+        id: actualGenreId,
         type: 'big_genre',
         name: parentGenreName,
         x: (Math.random() - 0.5) * 300,
         y: (Math.random() - 0.5) * 300
       });
 
-      // 2. 아티스트 메타데이터 노드 추가
-      const artistName = currentNode.trackSnapshot ? parseArtists(currentNode.trackSnapshot.artists) : 'Artist';
-      nodes.push({
-        id: 'a1',
-        type: 'artist',
-        name: artistName,
-        x: (Math.random() - 0.5) * 300,
-        y: (Math.random() - 0.5) * 300
-      });
+      // 2. 하위 장르 노드 추가 (실제 하위 장르 ID 매핑)
+      if (currentNode.subGenre) {
+        let actualSubGenreId = 'sg1';
+        const subNameLower = currentNode.subGenre.toLowerCase();
+        for (const [_, parentGenre] of cachedGenres.entries()) {
+          if (parentGenre.sub_genres_data) {
+            const sub = parentGenre.sub_genres_data.find(s => s.name.toLowerCase() === subNameLower);
+            if (sub) {
+              actualSubGenreId = sub.id;
+              break;
+            }
+          }
+        }
 
-      // 3. 앨범 메타데이터 노드 추가
-      const albumName = (currentNode.trackSnapshot as any)?.album_name || 'Album';
-      nodes.push({
-        id: 'al1',
-        type: 'album',
-        name: albumName,
-        x: (Math.random() - 0.5) * 300,
-        y: (Math.random() - 0.5) * 300
-      });
+        nodes.push({
+          id: actualSubGenreId,
+          type: 'sub_genre',
+          name: currentNode.subGenre,
+          x: (Math.random() - 0.5) * 300,
+          y: (Math.random() - 0.5) * 300,
+          parentGenre: parentGenreName
+        });
+      }
+
 
       // 4. 유사 곡 노드 추가 (Firestore에서 가져온 5곡 연동)
       if (currentNode.similarTracks && currentNode.similarTracks.length > 0) {
@@ -1066,6 +1109,7 @@ function MainApp() {
           onNodeClick={handleNodeClick}
           activeNodeId={currentNode?.id}
           onPositionsSettled={handlePositionsSettled}
+          showSubGenres={showSubGenres}
         />
         {/* 웰컴/홈 오버레이 뷰 (mode === 'home') */}
         {mode === 'home' && (
