@@ -602,8 +602,46 @@ function MainApp() {
     setCurrentNode(null);
   }, [cachedGenres, allGenresMeta, handleNodeClick]);
 
+  const [fovScale, setFovScale] = useState(0);
+
+  const triggerOpticsCompensation = useCallback(() => {
+    const startTime = performance.now();
+    const duration = 1800; // 1.8초 차원 도약 워프 오버레이 시간과 정렬
+
+    const animate = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+
+      let currentFOV = 0;
+      if (progress < 0.45) {
+        // 0% -> 45%: Reverse Lens Distortion 극대화 (0에서 -180까지 둥글게 빨려 들어감)
+        const t = progress / 0.45;
+        currentFOV = -180 * (t * t);
+      } else if (progress < 0.7) {
+        // 45% -> 70%: 렌즈 굴절 정점 유지 (-180 부근)
+        currentFOV = -180;
+      } else {
+        // 70% -> 100%: 새 성계로 랜딩하며 렌즈 왜곡 부드럽게 0으로 수축 (복원)
+        const t = (progress - 0.7) / 0.3;
+        const easeOut = 1 - Math.pow(1 - t, 3); // cubic ease-out
+        currentFOV = -180 * (1 - easeOut);
+      }
+
+      setFovScale(currentFOV);
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        setFovScale(0);
+      }
+    };
+
+    requestAnimationFrame(animate);
+  }, []);
+
   const startExploreMode = (tab: 'genre' | 'song') => {
     setIsTransitioning(true);
+    triggerOpticsCompensation(); // AE Optics Compensation 스탑워치 가동!
     
     // Delay actual exploration cockpit mounting to match the hyperdrive blast peak (0.8s)
     setTimeout(() => {
@@ -1013,21 +1051,20 @@ function MainApp() {
     <div 
       className="w-screen h-screen bg-[#050505] text-white overflow-hidden font-sans selection:bg-[#B026FF]/30 grid relative box-border transition-all duration-500"
       style={{
-        gridTemplateColumns: mode === 'home' ? '1fr' : '380px 1fr 320px',
+        gridTemplateColumns: '380px 1fr 320px',
         gridTemplateRows: '80px 1fr 80px',
       }}
     >
       {/* Row 1: Top HUD & Header */}
       <motion.header 
-        initial={mode === 'home' ? false : { y: -80, opacity: 0 }}
+        initial={{ y: -80, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ type: 'spring', stiffness: 80, damping: 15, delay: 0.1 }}
         className="relative z-30 flex items-center justify-between px-8 box-border select-none border-b border-white/10"
         style={{
           gridRow: '1',
-          gridColumn: mode === 'home' ? '1' : '1 / span 3',
-          backgroundImage: mode === 'home' ? 'none' : `url(${spaceshipTexture})`,
-          backgroundColor: mode === 'home' ? '#050505' : undefined,
+          gridColumn: '1 / span 3',
+          backgroundImage: `url(${spaceshipTexture})`,
           backgroundRepeat: 'repeat',
           backgroundSize: '200px 200px',
         }}
@@ -1101,21 +1138,39 @@ function MainApp() {
       </motion.header>
 
       {/* Row 2, Column 1: Left Panel Zone */}
-      {mode !== 'home' && (
-        <motion.div 
-          initial={{ x: -380, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          transition={{ type: 'spring', stiffness: 70, damping: 14 }}
-          className="relative flex flex-col justify-start min-h-0 border-r border-white/10"
-          style={{
-            gridRow: '2',
-            gridColumn: '1',
-            backgroundImage: `url(${spaceshipTexture})`,
-            backgroundRepeat: 'repeat',
-            backgroundSize: '200px 200px',
-            padding: '12px',
-          }}
-        >
+      <motion.div 
+        initial={{ x: -380, opacity: 0 }}
+        animate={{ x: 0, opacity: 1 }}
+        transition={{ type: 'spring', stiffness: 70, damping: 14 }}
+        className="relative flex flex-col justify-start min-h-0 border-r border-white/10"
+        style={{
+          gridRow: '2',
+          gridColumn: '1',
+          backgroundImage: `url(${spaceshipTexture})`,
+          backgroundRepeat: 'repeat',
+          backgroundSize: '200px 200px',
+          padding: '12px',
+        }}
+      >
+        {mode === 'home' ? (
+          <GlassPanel className="w-full h-full text-white z-20 shadow-2xl flex flex-col justify-start overflow-hidden p-4">
+            <div className="text-[10px] text-[#00FFFF] mb-1.5 font-mono tracking-widest uppercase">COCKPIT PLAYLIST</div>
+            <h2 className="text-xl font-bold mb-0.5 truncate leading-tight">Trending Playlist</h2>
+            <div className="text-xs text-white/40 mb-4 truncate">인기 곡 - 대한민국 (Top Songs)</div>
+            <div className="flex-1 w-full rounded-2xl overflow-hidden border border-[#00FFFF]/20 bg-black/60 shadow-[inset_0_0_15px_rgba(0,0,0,0.8)] relative">
+              <iframe 
+                data-testid="embed-iframe" 
+                style={{ borderRadius: '16px', border: 'none' }} 
+                src={`https://open.spotify.com/embed/playlist/${extractPlaylistId(import.meta.env.VITE_SPOTIFY_PLAYLIST_URL)}?utm_source=generator`}
+                width="100%" 
+                height="100%" 
+                allowFullScreen={true} 
+                allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" 
+                loading="lazy"
+              />
+            </div>
+          </GlassPanel>
+        ) : (
           <AnimatePresence mode="wait">
             <motion.div 
               key={currentNode?.id || 'root'} 
@@ -1146,214 +1201,274 @@ function MainApp() {
               />
             </motion.div>
           </AnimatePresence>
-        </motion.div>
-      )}
+        )}
+      </motion.div>
 
       {/* Row 2, Column 2: Center Space Window */}
       <div 
         className="relative h-full overflow-hidden min-h-0 flex items-center justify-center transition-all duration-500"
         style={{
           gridRow: '2',
-          gridColumn: mode === 'home' ? '1' : '2',
+          gridColumn: '2',
           backgroundImage: `url(${spaceNebulaBg})`,
           backgroundSize: 'cover',
           backgroundPosition: 'center',
         }}
       >
-        {/* Glassmorphic Background Blur Layer (Behind Constellation) when mode === 'explore' */}
-        {mode === 'explore' && (
+        {/* Optics Compensation Adjustment Layer (After Effects의 보정 레이어 모방) */}
+        <div 
+          className="absolute inset-0 w-full h-full overflow-hidden flex items-center justify-center"
+          style={{
+            filter: fovScale !== 0 ? 'url(#optics-compensation-warp)' : 'none',
+            willChange: fovScale !== 0 ? 'filter' : 'auto',
+          }}
+        >
+          {/* Glassmorphic Background Blur Layer (Behind Constellation) */}
           <div 
-            className="absolute inset-0 z-0 pointer-events-none"
+            className="absolute inset-0 z-0 pointer-events-none transition-all duration-500"
             style={{
-              backgroundColor: 'rgba(0, 0, 0, 0.4)',
-              backdropFilter: 'blur(12px)',
-              WebkitBackdropFilter: 'blur(12px)',
+              backgroundColor: mode === 'home' ? 'rgba(0, 0, 0, 0.25)' : 'rgba(0, 0, 0, 0.4)',
+              backdropFilter: mode === 'home' ? 'blur(2px)' : 'blur(12px)',
+              WebkitBackdropFilter: mode === 'home' ? 'blur(2px)' : 'blur(12px)',
             }}
           />
-        )}
 
-        {/* D3 Constellation Star Map wrapped in interactive z-indexed container */}
-        <div className="relative z-[5] w-full h-full flex items-center justify-center pointer-events-auto">
-          <Constellation
-            nodes={displayNodes}
-            centerNode={currentNode || undefined}
-            onNodeClick={handleNodeClick}
-            activeNodeId={currentNode?.id}
-            onPositionsSettled={handlePositionsSettled}
-            showSubGenres={showSubGenres}
-          />
-        </div>
-
-        {/* Cockpit Glass Window HUD Overlay (when mode === 'explore') */}
-        {mode === 'explore' && (
+          {/* D3 Constellation Star Map wrapped in interactive z-indexed container with hyperdrive warp zoom/rotate vortex */}
           <div 
-            className="absolute inset-0 z-10 pointer-events-none border border-[#00FFFF]/30 rounded-[24px] overflow-hidden shadow-[inset_0_0_80px_rgba(0,0,0,0.85)]"
+            className={`relative z-[5] w-full h-full flex items-center justify-center transition-all duration-[1600ms] ease-in-out pointer-events-auto ${mode === 'home' ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+            style={{
+              opacity: isTransitioning ? 0 : undefined,
+              transform: isTransitioning ? 'scale(2.4)' : 'scale(1)',
+              filter: isTransitioning ? 'blur(4px)' : 'blur(0px)',
+            }}
           >
-            {/* Glass shine diagonal line */}
-            <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/[0.035] to-transparent" />
-            
-            {/* HUD Corner Reticles / Grid Guide Lines (Center Radar Removed for clear star constellation visibility) */}
-            <div className="absolute inset-4 border border-[#00FFFF]/10 rounded-[16px]">
-              {/* Corner brackets */}
-              <div className="absolute top-4 left-4 w-6 h-6 border-t-2 border-l-2 border-[#00FFFF]/30 rounded-tl" />
-              <div className="absolute top-4 right-4 w-6 h-6 border-t-2 border-r-2 border-[#00FFFF]/30 rounded-tr" />
-              <div className="absolute bottom-4 left-4 w-6 h-6 border-b-2 border-l-2 border-[#00FFFF]/30 rounded-bl" />
-              <div className="absolute bottom-4 right-4 w-6 h-6 border-b-2 border-r-2 border-[#00FFFF]/30 rounded-br" />
-
-              {/* Cockpit HUD indicators */}
-              <div className="absolute top-6 left-8 font-mono text-[9px] text-[#00FFFF]/60 tracking-wider leading-relaxed">
-                SYS: ACTIVE<br />
-                NAV: CONSTELLATION_MAP
-              </div>
-              <div className="absolute top-6 right-8 font-mono text-[9px] text-[#00FFFF]/60 tracking-wider text-right leading-relaxed">
-                RADAR: 360° RANGE<br />
-                SIG: CONNECTED
-              </div>
-              <div className="absolute bottom-6 left-8 font-mono text-[9px] text-[#B026FF]/60 tracking-wider leading-relaxed">
-                DEEP DIVE: STANDBY<br />
-                HULL: 100%
-              </div>
-              <div className="absolute bottom-6 right-8 font-mono text-[9px] text-[#B026FF]/60 tracking-wider text-right leading-relaxed">
-                AUTO-DECODE: ON<br />
-                COCKPIT MODE
-              </div>
-            </div>
+            <Constellation
+              nodes={displayNodes}
+              centerNode={currentNode || undefined}
+              onNodeClick={handleNodeClick}
+              activeNodeId={currentNode?.id}
+              onPositionsSettled={handlePositionsSettled}
+              showSubGenres={showSubGenres}
+            />
           </div>
-        )}
 
-        {/* 웰컴/홈 오버레이 뷰 (mode === 'home') */}
-        {mode === 'home' && (
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-between py-6 pointer-events-none bg-black/35 backdrop-blur-[2px]">
-            <div className="text-center pointer-events-auto mt-[6vh] px-4">
-              <h2 className="text-3xl md:text-4xl font-bold leading-tight mb-6 drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)]">
-                알고리즘을 벗어나,<br />당신만의 음악 우주를 탐험하세요.
-              </h2>
-              <div className="flex items-center justify-center">
-                <button onClick={() => startExploreMode('genre')} className="px-8 py-3 rounded-full border border-[#B026FF] bg-[#2A0845]/70 text-white font-medium text-sm hover:bg-[#B026FF]/35 hover:shadow-[0_0_20px_rgba(176,38,255,0.5)] transition-all duration-300 backdrop-blur-sm cursor-pointer">
+          {/* 웰컴/홈 오버레이 뷰 (mode === 'home') with hyperdrive zoom out transition */}
+          {mode === 'home' && (
+            <div 
+              className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/15 transition-all duration-[800ms] ease-in"
+              style={{
+                opacity: isTransitioning ? 0 : 1,
+                transform: isTransitioning ? 'scale(1.25) translateY(20px)' : 'scale(1) translateY(0px)',
+                filter: isTransitioning ? 'blur(3px)' : 'blur(0px)',
+              }}
+            >
+              <div className="text-center pointer-events-auto max-w-xl px-6 flex flex-col items-center gap-7 animate-fade-in">
+                <h2 className="text-3xl md:text-4xl font-extrabold leading-tight tracking-wide drop-shadow-[0_4px_16px_rgba(0,0,0,0.95)]">
+                  알고리즘을 벗어나,<br />당신만의 음악 우주를 탐험하세요.
+                </h2>
+                <button 
+                  onClick={() => startExploreMode('genre')} 
+                  className="px-10 py-4.5 rounded-full border-2 border-[#B026FF] bg-[#2A0845]/85 text-white font-bold text-base hover:bg-[#B026FF]/40 hover:shadow-[0_0_35px_rgba(176,38,255,0.85)] hover:scale-105 transition-all duration-300 backdrop-blur-md cursor-pointer"
+                >
                   장르별 음악 탐색 시작
                 </button>
               </div>
             </div>
+          )}
+        </div>
 
-            {/* Trending Section Overlay inside central view */}
-            <div className="w-full max-w-4xl px-8 pointer-events-auto mb-[2vh]">
-              <div className="flex items-center gap-3 mb-3 justify-between">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-bold tracking-widest text-[#00FFFF] font-mono uppercase">인기 곡 - 대한민국 (Top Songs - South Korea)</h3>
-                  <span className="px-2 py-0.5 bg-[#1DB954]/30 border border-[#1DB954]/50 rounded-full text-[9px] text-[#1DB954] animate-pulse">LIVE CHART</span>
-                </div>
-              </div>
-              
-              <div className="w-full rounded-2xl overflow-hidden border border-[#00FFFF]/20 shadow-[0_0_30px_rgba(0,255,255,0.15)] bg-black/60 backdrop-blur-md transition-all duration-300 hover:border-[#00FFFF]/40 hover:shadow-[0_0_40px_rgba(0,255,255,0.25)]">
-                <iframe 
-                  data-testid="embed-iframe" 
-                  style={{ borderRadius: '16px' }} 
-                  src={`https://open.spotify.com/embed/playlist/${extractPlaylistId(import.meta.env.VITE_SPOTIFY_PLAYLIST_URL)}?utm_source=generator`}
-                  width="100%" 
-                  height="540" 
-                  frameBorder="0" 
-                  allowFullScreen={true} 
-                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" 
-                  loading="lazy"
-                />
-              </div>
+        {/* Cockpit Glass Window HUD Overlay (Always visible to maximize cockpit UI consistency) */}
+        <div 
+          className="absolute inset-0 z-10 pointer-events-none border border-[#00FFFF]/20 rounded-[24px] overflow-hidden shadow-[inset_0_0_80px_rgba(0,0,0,0.85)]"
+        >
+          {/* Glass shine diagonal line */}
+          <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/[0.035] to-transparent" />
+          
+          {/* HUD Corner Reticles / Grid Guide Lines */}
+          <div className="absolute inset-4 border border-[#00FFFF]/10 rounded-[16px]">
+            {/* Corner brackets */}
+            <div className="absolute top-4 left-4 w-6 h-6 border-t-2 border-l-2 border-[#00FFFF]/25 rounded-tl" />
+            <div className="absolute top-4 right-4 w-6 h-6 border-t-2 border-r-2 border-[#00FFFF]/25 rounded-tr" />
+            <div className="absolute bottom-4 left-4 w-6 h-6 border-b-2 border-l-2 border-[#00FFFF]/25 rounded-bl" />
+            <div className="absolute bottom-4 right-4 w-6 h-6 border-b-2 border-r-2 border-[#00FFFF]/25 rounded-br" />
+
+            {/* Cockpit HUD indicators */}
+            <div className="absolute top-6 left-8 font-mono text-[9px] text-[#00FFFF]/55 tracking-wider leading-relaxed">
+              SYS: {mode === 'home' ? 'STANDBY' : 'ACTIVE'}<br />
+              NAV: {mode === 'home' ? 'INITIALIZING' : 'CONSTELLATION_MAP'}
+            </div>
+            <div className="absolute top-6 right-8 font-mono text-[9px] text-[#00FFFF]/55 tracking-wider text-right leading-relaxed">
+              RADAR: 360° SENSING<br />
+              SIG: {spotifyLoggedIn ? 'CONNECTED' : 'STANDBY'}
+            </div>
+            <div className="absolute bottom-6 left-8 font-mono text-[9px] text-[#B026FF]/55 tracking-wider leading-relaxed">
+              DEEP DIVE: {mode === 'home' ? 'STANDBY' : 'READY'}<br />
+              HULL: 100%
+            </div>
+            <div className="absolute bottom-6 right-8 font-mono text-[9px] text-[#B026FF]/55 tracking-wider text-right leading-relaxed">
+              AUTO-DECODE: ON<br />
+              COCKPIT MODE
             </div>
           </div>
-        )}
+        </div>
+
+        {/* Immersive Local Space Hyperdrive Warp Transition Overlay (Cockpit Glass Internal Vortex) */}
+        <AnimatePresence>
+          {isTransitioning && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ 
+                opacity: [0, 1, 1, 0],
+              }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 1.8, ease: "easeInOut" }}
+              className="absolute inset-0 z-[12] bg-[#050505]/20 pointer-events-none flex items-center justify-center overflow-hidden"
+            >
+              {/* Warp Core Ring 1 */}
+              <motion.div
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ 
+                  scale: [0.8, 2.2, 3.8],
+                  opacity: [0, 0.85, 0] 
+                }}
+                transition={{ duration: 1.5, ease: "easeOut" }}
+                className="absolute w-[80%] h-[80%] rounded-full border-2 border-[#00FFFF]/35 flex items-center justify-center shadow-[0_0_60px_rgba(0,255,255,0.4)]"
+              >
+                <div className="w-[85%] h-[85%] rounded-full border border-dashed border-[#B026FF]/25" />
+              </motion.div>
+
+              {/* Warp Core Ring 2 */}
+              <motion.div
+                initial={{ scale: 0.4, opacity: 0 }}
+                animate={{ 
+                  scale: [0.4, 1.6, 2.8],
+                  opacity: [0, 0.7, 0] 
+                }}
+                transition={{ duration: 1.6, delay: 0.12, ease: "easeOut" }}
+                className="absolute w-[80%] h-[80%] rounded-full border border-[#B026FF]/45 flex items-center justify-center shadow-[0_0_40px_rgba(176,38,255,0.35)]"
+              >
+                <div className="w-[90%] h-[90%] rounded-full border border-dashed border-[#00FFFF]/15" />
+              </motion.div>
+
+              {/* Center hyper speed flash */}
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.1 }}
+                animate={{ 
+                  opacity: [0, 0.9, 0],
+                  scale: [0.1, 2.2, 4.0]
+                }}
+                transition={{ duration: 1.4, delay: 0.08 }}
+                className="absolute w-36 h-36 rounded-full bg-gradient-to-r from-[#00FFFF]/50 to-[#B026FF]/50 filter blur-[20px]"
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Row 2, Column 3: Right Panel Zone (Radar Chart & DBDIGGING LOG) */}
-      {mode !== 'home' && (
-        <motion.div 
-          initial={{ x: 320, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          transition={{ type: 'spring', stiffness: 70, damping: 14 }}
-          className="relative flex flex-col justify-between gap-y-3 min-h-0 border-l border-white/10"
-          style={{
-            gridRow: '2',
-            gridColumn: '3',
-            backgroundImage: `url(${spaceshipTexture})`,
-            backgroundRepeat: 'repeat',
-            backgroundSize: '200px 200px',
-            padding: '12px',
-          }}
-        >
-          {/* Top: Right Panel (Radar Chart) */}
-          <div className="flex-1 min-h-0 flex flex-col justify-start">
-            <AnimatePresence mode="wait">
-              <motion.div 
-                key={currentNode?.id || 'root'} 
-                initial={{ opacity: 0, x: 20 }} 
-                animate={{ opacity: 1, x: 0 }} 
-                exit={{ opacity: 0, x: 20 }} 
-                className="h-full w-full"
-              >
-                {currentNode && currentNode.type === 'big_genre' && currentNode.audioFeatures ? (
-                  <RightPanel 
-                    title={`${currentNode.name} 특성`} 
-                    subtitle="장르 평균 분석" 
-                    features={currentNode.audioFeatures} 
-                    featuresLabel="장르"
-                  />
-                ) : currentNode && currentNode.type === 'sub_genre' && currentNode.audioFeatures ? (
-                  <RightPanel 
-                    title={`${currentNode.name} 특성`} 
-                    subtitle="장르 평균 분석" 
-                    features={allGenresMeta.find(g => g.name === currentNode.parentGenre)?.average_audio_features || {}}
-                    compareFeatures={currentNode.audioFeatures}
-                    featuresLabel="장르"
-                    compareFeaturesLabel="하위 장르"
-                  />
-                ) : currentNode && currentNode.type === 'song' && currentNode.audioFeatures ? (
-                  <RightPanel title="곡 오디오 분석" subtitle={currentNode.trackSnapshot!.name}
-                    features={getParentGenreFeatures(currentNode.parentGenre) || {}}
-                    compareFeatures={currentNode.audioFeatures}
-                    featuresLabel={isSubGenre(currentNode.parentGenre) ? '하위 장르' : '장르'}
-                    compareFeaturesLabel="노래"
-                  />
-                ) : (
-                  <GlassPanel className="w-full h-full text-white flex flex-col items-center justify-center border border-white/10 p-6 min-h-[220px]">
-                    <div className="flex flex-col items-center text-center gap-3">
-                      <div className="w-12 h-12 rounded-full border border-dashed border-[#00FFFF]/40 flex items-center justify-center animate-spin" style={{ animationDuration: '6s' }}>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-[#00FFFF]">
-                          <path d="M12 2v20M2 12h20" />
-                          <circle cx="12" cy="12" r="10" />
-                        </svg>
-                      </div>
-                      <span className="text-[13px] font-bold text-[#00FFFF]/80 font-mono uppercase tracking-widest">RADAR SIGNAL WAITING</span>
-                      <span className="text-[11px] text-white/40 leading-relaxed font-sans">
-                        분석할 장르 또는 곡 노드를 클릭하여<br />오디오 육각형 시그널을 확인하세요.
-                      </span>
+      <motion.div 
+        initial={{ x: 320, opacity: 0 }}
+        animate={{ x: 0, opacity: 1 }}
+        transition={{ type: 'spring', stiffness: 70, damping: 14 }}
+        className="relative flex flex-col justify-between gap-y-3 min-h-0 border-l border-white/10"
+        style={{
+          gridRow: '2',
+          gridColumn: '3',
+          backgroundImage: `url(${spaceshipTexture})`,
+          backgroundRepeat: 'repeat',
+          backgroundSize: '200px 200px',
+          padding: '12px',
+        }}
+      >
+        {/* Top: Right Panel (Radar Chart) */}
+        <div className="flex-1 min-h-0 flex flex-col justify-start">
+          <AnimatePresence mode="wait">
+            <motion.div 
+              key={currentNode?.id || 'root'} 
+              initial={{ opacity: 0, x: 20 }} 
+              animate={{ opacity: 1, x: 0 }} 
+              exit={{ opacity: 0, x: 20 }} 
+              className="h-full w-full"
+            >
+              {mode === 'home' ? (
+                <GlassPanel className="w-full h-full text-white flex flex-col items-center justify-center border border-white/10 p-6 min-h-[220px]">
+                  <div className="flex flex-col items-center text-center gap-3.5">
+                    <div className="w-12 h-12 rounded-full border border-dashed border-[#B026FF]/40 flex items-center justify-center animate-spin" style={{ animationDuration: '10s' }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-[#B026FF] animate-pulse">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 6v6l4 2" />
+                      </svg>
                     </div>
-                  </GlassPanel>
-                )}
-              </motion.div>
-            </AnimatePresence>
-          </div>
+                    <span className="text-[12px] font-bold text-[#B026FF]/80 font-mono uppercase tracking-widest">COCKPIT READY</span>
+                    <span className="text-[11px] text-white/40 leading-relaxed font-sans">
+                      탐색선 분석 모듈 예열 완료.<br />음악 탐색을 가동하시면<br />실시간 레이더 오차 보정이 시작됩니다.
+                    </span>
+                  </div>
+                </GlassPanel>
+              ) : currentNode && currentNode.type === 'big_genre' && currentNode.audioFeatures ? (
+                <RightPanel 
+                  title={`${currentNode.name} 특성`} 
+                  subtitle="장르 평균 분석" 
+                  features={currentNode.audioFeatures} 
+                  featuresLabel="장르"
+                />
+              ) : currentNode && currentNode.type === 'sub_genre' && currentNode.audioFeatures ? (
+                <RightPanel 
+                  title={`${currentNode.name} 특성`} 
+                  subtitle="장르 평균 분석" 
+                  features={allGenresMeta.find(g => g.name === currentNode.parentGenre)?.average_audio_features || {}}
+                  compareFeatures={currentNode.audioFeatures}
+                  featuresLabel="장르"
+                  compareFeaturesLabel="하위 장르"
+                />
+              ) : currentNode && currentNode.type === 'song' && currentNode.audioFeatures ? (
+                <RightPanel title="곡 오디오 분석" subtitle={currentNode.trackSnapshot!.name}
+                  features={getParentGenreFeatures(currentNode.parentGenre) || {}}
+                  compareFeatures={currentNode.audioFeatures}
+                  featuresLabel={isSubGenre(currentNode.parentGenre) ? '하위 장르' : '장르'}
+                  compareFeaturesLabel="노래"
+                />
+              ) : (
+                <GlassPanel className="w-full h-full text-white flex flex-col items-center justify-center border border-white/10 p-6 min-h-[220px]">
+                  <div className="flex flex-col items-center text-center gap-3">
+                    <div className="w-12 h-12 rounded-full border border-dashed border-[#00FFFF]/40 flex items-center justify-center animate-spin" style={{ animationDuration: '6s' }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-[#00FFFF]">
+                        <path d="M12 2v20M2 12h20" />
+                        <circle cx="12" cy="12" r="10" />
+                      </svg>
+                    </div>
+                    <span className="text-[13px] font-bold text-[#00FFFF]/80 font-mono uppercase tracking-widest">RADAR SIGNAL WAITING</span>
+                    <span className="text-[11px] text-white/40 leading-relaxed font-sans">
+                      분석할 장르 또는 곡 노드를 클릭하여<br />오디오 육각형 시그널을 확인하세요.
+                    </span>
+                  </div>
+                </GlassPanel>
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </div>
 
-          {/* Bottom: DBDIGGING LOG */}
-          <GlassPanel className="w-full h-[25vh] min-h-[160px] text-white">
-            <div className="flex-1 min-h-0 w-full p-2 flex flex-col">
-              <div className="text-[10px] text-[#00FFFF] mb-1 font-mono tracking-widest uppercase">DBDIGGING LOG</div>
-              <div className="flex-1 min-h-0 overflow-hidden relative">
-                <Minimap />
-              </div>
+        {/* Bottom: DBDIGGING LOG */}
+        <GlassPanel className="w-full h-[25vh] min-h-[160px] text-white">
+          <div className="flex-1 min-h-0 w-full p-2 flex flex-col">
+            <div className="text-[10px] text-[#00FFFF] mb-1 font-mono tracking-widest uppercase">DBDIGGING LOG</div>
+            <div className="flex-1 min-h-0 overflow-hidden relative">
+              <Minimap />
             </div>
-          </GlassPanel>
-        </motion.div>
-      )}
+          </div>
+        </GlassPanel>
+      </motion.div>
 
       {/* Row 3: Bottom Console Frame */}
       <motion.footer 
-        initial={mode === 'home' ? false : { y: 80, opacity: 0 }}
+        initial={{ y: 80, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ type: 'spring', stiffness: 70, damping: 14, delay: 0.15 }}
         className="relative z-20 select-none border-t border-white/10"
         style={{
           gridRow: '3',
           gridColumn: '1 / span 3',
-          backgroundImage: mode === 'home' ? 'none' : `url(${spaceshipTexture})`,
-          backgroundColor: mode === 'home' ? '#050505' : undefined,
+          backgroundImage: `url(${spaceshipTexture})`,
           backgroundRepeat: 'repeat',
           backgroundSize: '200px 200px',
         }}
@@ -1405,34 +1520,27 @@ function MainApp() {
         )}
       </AnimatePresence>
 
-      {/* Immersive Camera Zoom Transition Overlay */}
-      <AnimatePresence>
-        {isTransitioning && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.98 }}
-            animate={{ 
-              opacity: [0, 1, 1, 0],
-              scale: [0.98, 1.08, 1.15]
-            }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 1.8, ease: "easeInOut" }}
-            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[3px] pointer-events-none flex items-center justify-center"
-          >
-            {/* Subtle, premium HUD vignette ring that expands and fades */}
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ 
-                scale: [0.9, 1.2, 1.4],
-                opacity: [0, 0.35, 0] 
-              }}
-              transition={{ duration: 1.5, ease: "easeOut" }}
-              className="absolute w-[40vw] h-[40vw] max-w-[400px] max-h-[400px] rounded-full border border-[#00FFFF]/20 flex items-center justify-center shadow-[0_0_50px_rgba(0,255,255,0.05)]"
-            >
-              <div className="w-[80%] h-[80%] rounded-full border border-dashed border-[#B026FF]/10" />
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* AE Optics Compensation (광학 구면 왜곡) 하드웨어 가속 SVG displacementMap 필터 */}
+      <svg xmlns="http://www.w3.org/2000/svg" className="hidden w-0 h-0 absolute pointer-events-none">
+        <defs>
+          <filter id="optics-compensation-warp" x="-20%" y="-20%" width="140%" height="140%">
+            <feImage 
+              href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='800' height='800' viewBox='0 0 800 800'><radialGradient id='rg' cx='50%' cy='50%' r='50%'><stop offset='0%' stop-color='%237f7f00'/><stop offset='100%' stop-color='%23ff0000'/></radialGradient><rect width='800' height='800' fill='url(%23rg)'/></svg>"
+              result="distortionMap"
+              x="0%" y="0%" width="100%" height="100%"
+              preserveAspectRatio="none"
+            />
+            <feDisplacementMap
+              in="SourceGraphic"
+              in2="distortionMap"
+              scale={fovScale}
+              xChannelSelector="R"
+              yChannelSelector="G"
+              result="warped"
+            />
+          </filter>
+        </defs>
+      </svg>
     </div>
   );
 }
