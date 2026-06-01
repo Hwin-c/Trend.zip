@@ -14,11 +14,13 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 async function check() {
-  const snapshot = await getDocs(query(collection(db, 'test_tracks'), limit(1)));
+  const snapshot = await getDocs(query(collection(db, 'tracks'), limit(5)));
   if (snapshot.empty) {
-    console.log("No documents in test_tracks");
+    console.log("No documents in tracks");
   } else {
-    console.log(snapshot.docs[0].data());
+    snapshot.docs.forEach((doc, idx) => {
+      console.log(`Document ${idx}:`, doc.id, doc.data());
+    });
   }
 }
 

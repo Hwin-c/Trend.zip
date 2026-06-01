@@ -175,6 +175,15 @@ function MainApp() {
   const [cachedGenres, setCachedGenres] = useState<Map<string, ParentGenre>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [visitedStarIds, setVisitedStarIds] = useState<string[]>(() => {
+    try {
+      const stored = sessionStorage.getItem('visited_star_ids');
+      return stored ? JSON.parse(stored) : [];
+    } catch (e) {
+      console.error("Error initializing visitedStarIds state:", e);
+      return [];
+    }
+  });
 
   // Prevent duplicate Spotify API calls for the same track ID concurrently
   const pendingFetches = useRef<Set<string>>(new Set());
@@ -467,6 +476,22 @@ function MainApp() {
           parentGenre: parentGenreName
         };
       }
+    }
+
+    // 세션 스토리지 중복 방지 캐시 연동: 사용자가 클릭하여 탐험한 별의 ID 축적
+    if (node.id && node.id !== 'parent_genre_node' && node.id !== 'sg1' && node.id !== 'spaceship' && node.id !== 'ship') {
+      setVisitedStarIds(prev => {
+        if (!prev.includes(node.id)) {
+          const next = [...prev, node.id];
+          try {
+            sessionStorage.setItem('visited_star_ids', JSON.stringify(next));
+          } catch (e) {
+            console.error("Error setting visited_star_ids in sessionStorage:", e);
+          }
+          return next;
+        }
+        return prev;
+      });
     }
 
     addToLog(node.id, node.name, node.type);
@@ -824,8 +849,21 @@ function MainApp() {
     if (mode === 'home') return [];
 
     if (!currentNode) {
-      // Root View: Parent Genres (Limit to 30)
-      const visibleParentGenres = allGenresMeta.slice(0, 30);
+      // Root View: Parent Genres (Limit to 20 for performance optimization)
+      // 중복 방지 캐시 필터링
+      let filteredParentGenres = allGenresMeta.filter(pg => !visitedStarIds.includes(pg.id));
+      
+      // 안전장치 폴백: 남은 장르가 5개 미만이면 세션 캐시 초기화
+      if (filteredParentGenres.length < 5) {
+        sessionStorage.removeItem('visited_star_ids');
+        setTimeout(() => setVisitedStarIds([]), 0);
+        filteredParentGenres = allGenresMeta;
+      }
+
+      // 최대 표시 개수 제한
+      const limitCount = 20;
+      const visibleParentGenres = filteredParentGenres.slice(0, limitCount);
+
       const nodes: NodeData[] = visibleParentGenres.map((pg) => {
         const cached = nodePositionCache.get(pg.id);
         return {
@@ -910,21 +948,41 @@ function MainApp() {
           ];
         }
       } else {
-        // Show top 50 Songs with refresh/shuffle logic
+        // Show top 25 Songs (Limit optimized) with popularity sorting & caching
         // If sub_genre, its topTracks are in currentNode.topTracks.
         // If big_genre, its topTracks are in parentData.top_tracks.
         const sourceTracks = currentNode.type === 'sub_genre' ? currentNode.topTracks : parentData?.top_tracks;
         let tracks = [...(sourceTracks || [])];
+        
+        // 1. 인기도(popularity_score 또는 popularity) 내림차순 정렬
+        tracks = tracks.sort((a, b) => {
+          const popA = a.popularity ?? (a.popularity_score ?? (a.features?.popularity ?? -1));
+          const popB = b.popularity ?? (b.popularity_score ?? (b.features?.popularity ?? -1));
+          return popB - popA;
+        });
+
+        // 2. 세션 스토리지 중복 방지 캐시 필터링
+        let filteredTracks = tracks.filter(t => !visitedStarIds.includes(t.track_id));
+
+        // 3. 안전장치 폴백: 남은 노래가 5개 미만이면 세션 캐시 초기화
+        if (filteredTracks.length < 5) {
+          sessionStorage.removeItem('visited_star_ids');
+          setTimeout(() => setVisitedStarIds([]), 0);
+          filteredTracks = tracks;
+        }
+
         if (refreshKey > 0) {
           // Shuffle tracks randomly if refresh button was clicked
-          tracks = tracks.sort(() => Math.random() - 0.5);
+          filteredTracks = filteredTracks.sort(() => Math.random() - 0.5);
         }
-        tracks = tracks.slice(0, 50);
+
+        // 4. 성능 최적화를 위한 최대 별 개수 제한 (기존 50 -> 25)
+        filteredTracks = filteredTracks.slice(0, 25);
 
         // Append dynamically fetched deep tracks
-        tracks = [...tracks, ...deepTracks];
+        filteredTracks = [...filteredTracks, ...deepTracks];
 
-        const songNodes = tracks.map((t) => {
+        const songNodes = filteredTracks.map((t) => {
           return {
             id: t.track_id, type: 'song', name: t.name,
             x: (Math.random() - 0.5) * 600, y: (Math.random() - 0.5) * 600,
@@ -1025,7 +1083,7 @@ function MainApp() {
     }
 
     return [];
-  }, [mode, currentNode, exploreTab, showSubGenres, allGenresMeta, cachedGenres, refreshKey]);
+  }, [mode, currentNode, exploreTab, showSubGenres, allGenresMeta, cachedGenres, refreshKey, visitedStarIds]);
 
   const leftPanelProps = useMemo(() => {
     // 1. Root View (No Node selected or Home screen)

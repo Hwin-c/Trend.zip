@@ -139,3 +139,10 @@ npm run build
 # 2) Firebase Hosting 배포
 firebase deploy --only hosting
 ```
+
+### 4. Spotify 인기도 일괄 업데이트 스크립트 구동 (DB Migration)
+Firestore의 `tracks` 컬렉션에 Spotify 인기도 수치를 일괄 갱신하여 쿼리 정렬 최적화를 보장하기 위한 스크립트입니다. `popularity` 필드가 누락되었거나 `-1`로 설정된 문서를 Spotify API를 활용해 최대 50개씩 일괄 조회(Batching)하여 Firestore `writeBatch`로 일괄 업데이트합니다.
+```bash
+# 로컬 백엔드 환경 변수(.env) 기반으로 마이그레이션 스크립트 실행
+node -r dotenv/config updatePopularity.js
+```

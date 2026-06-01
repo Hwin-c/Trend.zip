@@ -109,15 +109,14 @@ export const fetchAllParentGenres = async (): Promise<ParentGenre[]> => {
     console.error("Error fetching all parent genres:", error);
     return [];
   }
-};
-
-export const fetchTracksByGenre = async (genreName: string, maxLimit: number = 20): Promise<Track[]> => {
+};export const fetchTracksByGenre = async (genreName: string, maxLimit: number = 20): Promise<Track[]> => {
   try {
     const tracksRef = collection(db, 'tracks');
+    // VITE_SPOTIFY_MIGRATION 완료 후, Firestore의 신규 'popularity' 필드로 내림차순 정렬
     const q = query(
       tracksRef,
       where("Genre_List", "array-contains", genreName),
-      orderBy("popularity_score", "desc"),
+      orderBy("popularity", "desc"),
       limit(maxLimit)
     );
     const snapshot = await getDocs(q);
