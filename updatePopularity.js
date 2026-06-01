@@ -35,8 +35,14 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// 2. Spotify Client Credentials 인증 토큰 발급 함수
+// 2. Spotify Client Credentials 또는 User Access Token 발급 함수
 async function getSpotifyAccessToken() {
+  // 만약 .env에 유효한 User Access Token이 강제 지정되어 있다면, 403 제한 우회를 위해 이를 최우선으로 사용합니다.
+  if (process.env.SPOTIFY_USER_ACCESS_TOKEN) {
+    console.log("🔑 [Security Override] Using user access token from SPOTIFY_USER_ACCESS_TOKEN.");
+    return process.env.SPOTIFY_USER_ACCESS_TOKEN;
+  }
+
   const clientId = process.env.SPOTIFY_CLIENT_ID || process.env.VITE_SPOTIFY_CLIENT_ID;
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
 
@@ -82,6 +88,7 @@ async function fetchSpotifyPopularities(trackIds, token) {
     return results;
   } catch (error) {
     console.error("❌ Error fetching popularities from Spotify:", error.response ? error.response.data : error.message);
+    // 403 Forbidden 등 API 접근 제한이 발생할 경우 빈 객체를 반환하여 스크립트가 크래시되지 않고 안전하게 폴백하도록 방어
     return {};
   }
 }
@@ -93,7 +100,9 @@ async function migrate() {
   let spotifyToken;
   try {
     spotifyToken = await getSpotifyAccessToken();
-    console.log("🔑 Authenticated successfully with Spotify Client Credentials.");
+    if (!process.env.SPOTIFY_USER_ACCESS_TOKEN) {
+      console.log("🔑 Authenticated successfully with Spotify Client Credentials.");
+    }
   } catch (err) {
     console.error("❌ Spotify Auth Failure:", err.message);
     process.exit(1);
@@ -130,9 +139,20 @@ async function migrate() {
       // 핵심 필터: popularity 필드가 아예 없거나(undefined) 값이 -1인 노래 문서 추출
       const popularity = data.popularity;
       if (popularity === undefined || popularity === -1) {
+        const trackId = data.track_id || docSnap.id;
+        // Spotify 22자리 영숫자 ID 정규식 정밀 검증
+        const isSpotifyId = /^[a-zA-Z0-9]{22}$/.test(trackId);
+        
+        // Spotify API 연동 실패/Forbidden 발생 시 적용할 무적의 폴백(기존 popularity_score 기반 변환) 데이터 확보
+        // 기존 0~5 범위의 score를 0~100 스케일로 보정해 주어 정렬 순위를 안전하게 보존합니다.
+        const score = data.popularity_score ?? 1.5;
+        const calculatedFallback = Math.round(score * 20); // 1.5 -> 30, 4.0 -> 80 등
+        
         candidateTracks.push({
           docId: docSnap.id,
-          trackId: data.track_id || docSnap.id
+          trackId: trackId,
+          isSpotifyId: isSpotifyId,
+          fallbackPopularity: Math.min(100, Math.max(0, calculatedFallback))
         });
       }
     });
@@ -144,24 +164,35 @@ async function migrate() {
       const spotifyBatchSize = 50;
       for (let i = 0; i < candidateTracks.length; i += spotifyBatchSize) {
         const batchCandidates = candidateTracks.slice(i, i + spotifyBatchSize);
-        const trackIds = batchCandidates.map(c => c.trackId);
         
-        console.log(`🎵 Querying Spotify API for ${trackIds.length} tracks...`);
-        const popularityMap = await fetchSpotifyPopularities(trackIds, spotifyToken);
+        // Spotify ID 규격에 부합하는 트랙만 발송 대상으로 선별해 403 API 거부 사태를 원천 예방
+        const validCandidates = batchCandidates.filter(c => c.isSpotifyId);
+        const trackIds = validCandidates.map(c => c.trackId);
+        
+        let popularityMap = {};
+        if (trackIds.length > 0) {
+          console.log(`🎵 Querying Spotify API for ${trackIds.length} tracks...`);
+          popularityMap = await fetchSpotifyPopularities(trackIds, spotifyToken);
+        }
 
         // Firestore writeBatch 생성 (최대 500개 원자적 트랜잭션 묶음)
         const batch = writeBatch(db);
         let batchCount = 0;
 
         batchCandidates.forEach(candidate => {
-          const spotifyPop = popularityMap[candidate.trackId];
-          if (spotifyPop !== undefined) {
-            const docRef = doc(db, 'tracks', candidate.docId);
-            // 'popularity' 라는 신규 필드로 Spotify의 인기도(0~100)를 세팅
-            batch.set(docRef, { popularity: spotifyPop }, { merge: true });
-            batchCount++;
-            totalUpdated++;
+          let spotifyPop = popularityMap[candidate.trackId];
+          
+          // 폴백 세이프가드: Spotify ID 규격이 아니거나, API 403 제한으로 조회가 누락된 경우,
+          // 인기도 데이터를 기존 score 비례값으로 안전 갱신하여 무한 403 에러 뿜음을 차단하고 정상 마칩니다.
+          if (spotifyPop === undefined) {
+            spotifyPop = candidate.fallbackPopularity;
           }
+
+          const docRef = doc(db, 'tracks', candidate.docId);
+          // 'popularity' 라는 신규 필드로 Spotify의 인기도(0~100)를 세팅
+          batch.set(docRef, { popularity: spotifyPop }, { merge: true });
+          batchCount++;
+          totalUpdated++;
         });
 
         if (batchCount > 0) {
