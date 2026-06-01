@@ -23,6 +23,7 @@ import spaceshipTextureC from './assets/spaceship_texture_C.webp';
 import spaceNebulaBg from './assets/space_nebula_bg.webp';
 import { LandscapeGuide } from './components/LandscapeGuide';
 import { CockpitFrame } from './components/CockpitFrame';
+import { TutorialOverlay } from './components/TutorialOverlay';
 
 
 // SVG Icons
@@ -46,6 +47,7 @@ const SpotifyIcon = () => (
 
 function MainApp() {
   const [mode, setMode] = useState<'home' | 'explore'>('home');
+  const [isTutorialOpen, setIsTutorialOpen] = useState<boolean>(false);
   const [exploreTab, setExploreTab] = useState<'genre' | 'song'>('genre');
   const [showSubGenres, setShowSubGenres] = useState<boolean>(false);
   const [currentNode, setCurrentNode] = useState<NodeData | null>(null);
@@ -919,9 +921,12 @@ function MainApp() {
         // Show Sub Genres
         const sgs = parentData?.sub_genres_data || [];
         const subGenreNodes = sgs.map((sg) => {
+          const cached = nodePositionCache.get(sg.id);
           return {
             id: sg.id, type: 'sub_genre', name: sg.name, parentGenre: currentNode.name,
-            x: (Math.random() - 0.5) * 600, y: (Math.random() - 0.5) * 600,
+            x: cached?.x ?? (Math.random() - 0.5) * 600, 
+            y: cached?.y ?? (Math.random() - 0.5) * 600,
+            _fx: cached?.x, _fy: cached?.y,
             audioFeatures: sg.average_audio_features
           };
         });
@@ -965,9 +970,12 @@ function MainApp() {
         filteredTracks = [...filteredTracks, ...deepTracks];
 
         const songNodes = filteredTracks.map((t) => {
+          const cached = nodePositionCache.get(t.track_id);
           return {
             id: t.track_id, type: 'song', name: t.name,
-            x: (Math.random() - 0.5) * 600, y: (Math.random() - 0.5) * 600,
+            x: cached?.x ?? (Math.random() - 0.5) * 600, 
+            y: cached?.y ?? (Math.random() - 0.5) * 600,
+            _fx: cached?.x, _fy: cached?.y,
             trackSnapshot: t,
             // Bug 2 fix: DB top_tracks don't have .features, use individual fields as fallback
             audioFeatures: t.audio_features || t.features || { energy: t.energy, danceability: t.danceability, valence: t.valence },
@@ -1004,12 +1012,14 @@ function MainApp() {
       const actualGenreId = actualGenreMeta ? actualGenreMeta.id : 'g1';
 
       // 1. 대장르 메타데이터 노드 추가
+      const cachedBig = nodePositionCache.get(actualGenreId);
       nodes.push({
         id: actualGenreId,
         type: 'big_genre',
         name: parentGenreName,
-        x: (Math.random() - 0.5) * 300,
-        y: (Math.random() - 0.5) * 300
+        x: cachedBig?.x ?? (Math.random() - 0.5) * 300,
+        y: cachedBig?.y ?? (Math.random() - 0.5) * 300,
+        _fx: cachedBig?.x, _fy: cachedBig?.y
       });
 
       // 2. 하위 장르 노드 추가 (실제 하위 장르 ID 매핑)
@@ -1026,12 +1036,14 @@ function MainApp() {
           }
         }
 
+        const cachedSub = nodePositionCache.get(actualSubGenreId);
         nodes.push({
           id: actualSubGenreId,
           type: 'sub_genre',
           name: currentNode.subGenre,
-          x: (Math.random() - 0.5) * 300,
-          y: (Math.random() - 0.5) * 300,
+          x: cachedSub?.x ?? (Math.random() - 0.5) * 300,
+          y: cachedSub?.y ?? (Math.random() - 0.5) * 300,
+          _fx: cachedSub?.x, _fy: cachedSub?.y,
           parentGenre: parentGenreName
         });
       }
@@ -1040,12 +1052,14 @@ function MainApp() {
       // 4. 유사 곡 노드 추가 (Firestore에서 가져온 5곡 연동)
       if (currentNode.similarTracks && currentNode.similarTracks.length > 0) {
         currentNode.similarTracks.forEach((t) => {
+          const cachedTrack = nodePositionCache.get(t.track_id);
           nodes.push({
             id: t.track_id,
             type: 'song',
             name: t.name,
-            x: (Math.random() - 0.5) * 400,
-            y: (Math.random() - 0.5) * 400,
+            x: cachedTrack?.x ?? (Math.random() - 0.5) * 400,
+            y: cachedTrack?.y ?? (Math.random() - 0.5) * 400,
+            _fx: cachedTrack?.x, _fy: cachedTrack?.y,
             trackSnapshot: t,
             audioFeatures: t.audio_features || t.features || { energy: t.energy, danceability: t.danceability, valence: t.valence },
             parentGenre: parentGenreName
@@ -1336,10 +1350,17 @@ function MainApp() {
                   />
                 )}
               </div>
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={() => setIsTutorialOpen(true)}
+                  className="text-xs font-mono font-bold border border-[#00FFFF]/30 hover:border-[#00FFFF] bg-black/60 hover:bg-[#00FFFF]/10 text-[#00FFFF] rounded-full px-3.5 py-2 flex items-center gap-1.5 transition-all shadow-[0_0_10px_rgba(0,255,255,0.05)] cursor-pointer active:scale-95 shrink-0"
+                  title="튜토리얼 가이드 다시 보기"
+                >
+                  <span className="animate-pulse">❓</span> HELP
+                </button>
                 <button
                   onClick={handleSpotifyLogin}
-                  className="text-xs font-medium rounded-full px-4 py-2 flex items-center gap-2 transition-colors bg-[#1DB954] text-black hover:bg-[#1ed760]"
+                  className="text-xs font-medium rounded-full px-4 py-2 flex items-center gap-2 transition-colors bg-[#1DB954] text-black hover:bg-[#1ed760] spotify-connect-header"
                 >
                   <SpotifyIcon /> {spotifyLoggedIn ? `Connected${spotifyProfile?.display_name ? ` (${spotifyProfile.display_name})` : ' ✓'}` : 'Connect to Spotify'}
                 </button>
@@ -1348,60 +1369,62 @@ function MainApp() {
           </>
         }
         leftPanelSlot={
-          mode === 'home' ? (
-            <GlassPanel className="w-full h-full text-white z-20 shadow-2xl flex flex-col justify-start overflow-hidden p-4">
-              <div className="text-[10px] text-[#00FFFF] mb-1.5 font-mono tracking-widest uppercase">COCKPIT PLAYLIST</div>
-              <h2 className="text-xl font-bold mb-0.5 truncate leading-tight">Trending Playlist</h2>
-              <div className="text-xs text-white/40 mb-4 truncate">인기 곡 - 대한민국 (Top Songs)</div>
-              <div className="flex-1 w-full rounded-2xl overflow-hidden border border-[#00FFFF]/20 bg-black/60 shadow-[inset_0_0_15px_rgba(0,0,0,0.8)] relative">
-                <iframe 
-                  data-testid="embed-iframe" 
-                  style={{ borderRadius: '16px', border: 'none' }} 
-                  src={`https://open.spotify.com/embed/playlist/${extractPlaylistId(import.meta.env.VITE_SPOTIFY_PLAYLIST_URL)}?utm_source=generator`}
-                  width="100%" 
-                  height="100%" 
-                  allowFullScreen={true} 
-                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" 
-                  loading="lazy"
-                />
-              </div>
-            </GlassPanel>
-          ) : (
-            <AnimatePresence mode="wait">
-              <motion.div 
-                key={currentNode?.id || 'root'} 
-                initial={{ opacity: 0, x: -20 }} 
-                animate={{ opacity: 1, x: 0 }} 
-                exit={{ opacity: 0, x: -20 }} 
-                className="h-full w-full"
-              >
-                <LeftPanel
-                  type={leftPanelProps.type}
-                  title={leftPanelProps.title}
-                  subtitle={leftPanelProps.subtitle}
-                  items={leftPanelProps.items}
-                  onItemClick={leftPanelProps.onItemClick}
-                  trackInfo={leftPanelProps.trackInfo}
-                  isSpotifyLoggedIn={leftPanelProps.isSpotifyLoggedIn}
-                  isLiked={leftPanelProps.isLiked}
-                  onLike={leftPanelProps.onLike}
-                  onAddToPlaylist={leftPanelProps.onAddToPlaylist}
-                  exploreTab={mode === 'explore' ? exploreTab : undefined}
-                  setExploreTab={setExploreTab}
-                  showSubGenres={showSubGenres}
-                  onToggleSubGenres={handleToggleSubGenres}
-                  isExploreDeep={mode === 'explore' && currentNode !== null}
-                  isLoadingSubGenres={isLoadingSubGenres}
-                  showTabSwitcher={leftPanelProps.showTabSwitcher}
-                  showSubGenreToggle={leftPanelProps.showSubGenreToggle}
-                />
-              </motion.div>
-            </AnimatePresence>
-          )
+          <div className="h-full w-full left-panel-container">
+            {mode === 'home' ? (
+              <GlassPanel className="w-full h-full text-white z-20 shadow-2xl flex flex-col justify-start overflow-hidden p-4">
+                <div className="text-[10px] text-[#00FFFF] mb-1.5 font-mono tracking-widest uppercase">COCKPIT PLAYLIST</div>
+                <h2 className="text-xl font-bold mb-0.5 truncate leading-tight">Trending Playlist</h2>
+                <div className="text-xs text-white/40 mb-4 truncate">인기 곡 - 대한민국 (Top Songs)</div>
+                <div className="flex-1 w-full rounded-2xl overflow-hidden border border-[#00FFFF]/20 bg-black/60 shadow-[inset_0_0_15px_rgba(0,0,0,0.8)] relative">
+                  <iframe 
+                    data-testid="embed-iframe" 
+                    style={{ borderRadius: '16px', border: 'none' }} 
+                    src={`https://open.spotify.com/embed/playlist/${extractPlaylistId(import.meta.env.VITE_SPOTIFY_PLAYLIST_URL)}?utm_source=generator`}
+                    width="100%" 
+                    height="100%" 
+                    allowFullScreen={true} 
+                    allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" 
+                    loading="lazy"
+                  />
+                </div>
+              </GlassPanel>
+            ) : (
+              <AnimatePresence mode="wait">
+                <motion.div 
+                  key={currentNode?.id || 'root'} 
+                  initial={{ opacity: 0, x: -20 }} 
+                  animate={{ opacity: 1, x: 0 }} 
+                  exit={{ opacity: 0, x: -20 }} 
+                  className="h-full w-full"
+                >
+                  <LeftPanel
+                    type={leftPanelProps.type}
+                    title={leftPanelProps.title}
+                    subtitle={leftPanelProps.subtitle}
+                    items={leftPanelProps.items}
+                    onItemClick={leftPanelProps.onItemClick}
+                    trackInfo={leftPanelProps.trackInfo}
+                    isSpotifyLoggedIn={leftPanelProps.isSpotifyLoggedIn}
+                    isLiked={leftPanelProps.isLiked}
+                    onLike={leftPanelProps.onLike}
+                    onAddToPlaylist={leftPanelProps.onAddToPlaylist}
+                    exploreTab={mode === 'explore' ? exploreTab : undefined}
+                    setExploreTab={setExploreTab}
+                    showSubGenres={showSubGenres}
+                    onToggleSubGenres={handleToggleSubGenres}
+                    isExploreDeep={mode === 'explore' && currentNode !== null}
+                    isLoadingSubGenres={isLoadingSubGenres}
+                    showTabSwitcher={leftPanelProps.showTabSwitcher}
+                    showSubGenreToggle={leftPanelProps.showSubGenreToggle}
+                  />
+                </motion.div>
+              </AnimatePresence>
+            )}
+          </div>
         }
         centerSlot={
           <div 
-            className="w-full h-full relative overflow-hidden flex items-center justify-center"
+            className="w-full h-full relative overflow-hidden flex items-center justify-center constellation-container"
             style={{
               backgroundImage: `url(${spaceNebulaBg})`,
               backgroundSize: 'cover',
@@ -1459,12 +1482,20 @@ function MainApp() {
                     <h2 className="text-3xl md:text-4xl font-extrabold leading-tight tracking-wide drop-shadow-[0_4px_16px_rgba(0,0,0,0.95)] text-white">
                       알고리즘을 벗어나,<br />당신만의 음악 우주를 탐험하세요.
                     </h2>
-                    <button 
-                      onClick={() => startExploreMode('genre')} 
-                      className="px-10 py-4.5 rounded-full border-2 border-[#B026FF] bg-[#2A0845]/85 text-white font-bold text-base hover:bg-[#B026FF]/40 hover:shadow-[0_0_35px_rgba(176,38,255,0.85)] hover:scale-105 transition-all duration-300 backdrop-blur-md cursor-pointer"
-                    >
-                      장르별 음악 탐색 시작
-                    </button>
+                    <div className="flex flex-col items-center gap-3 w-full">
+                      <button 
+                        onClick={() => startExploreMode('genre')} 
+                        className="px-10 py-4.5 rounded-full border-2 border-[#B026FF] bg-[#2A0845]/85 text-white font-bold text-base hover:bg-[#B026FF]/40 hover:shadow-[0_0_35px_rgba(176,38,255,0.85)] hover:scale-105 transition-all duration-300 backdrop-blur-md cursor-pointer w-[280px] text-center"
+                      >
+                        장르별 음악 탐색 시작
+                      </button>
+                      <button 
+                        onClick={() => setIsTutorialOpen(true)} 
+                        className="px-8 py-3 rounded-full border border-[#00FFFF]/35 bg-[#00FFFF]/10 hover:bg-[#00FFFF]/20 text-[#00FFFF] font-bold text-sm hover:shadow-[0_0_20px_rgba(0,255,255,0.4)] hover:scale-105 transition-all duration-300 backdrop-blur-sm cursor-pointer w-[240px] text-center"
+                      >
+                        튜토리얼 가이드
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1558,7 +1589,7 @@ function MainApp() {
         rightPanelSlot={
           <>
             {/* Top: Right Panel (Radar Chart) */}
-            <div className="flex-1 min-h-0 flex flex-col justify-start">
+            <div className="flex-1 min-h-0 flex flex-col justify-start right-panel-container">
               <AnimatePresence mode="wait">
                 <motion.div 
                   key={currentNode?.id || 'root'} 
@@ -1626,7 +1657,7 @@ function MainApp() {
             </div>
 
             {/* Bottom: DBDIGGING LOG */}
-            <GlassPanel className="w-full h-[25vh] min-h-[160px] text-white">
+            <GlassPanel className="w-full h-[25vh] min-h-[160px] text-white constellation-log-container">
               <div className="flex-1 min-h-0 w-full p-2 flex flex-col">
                 <div className="text-[10px] text-[#00FFFF] mb-1 font-mono tracking-widest uppercase">DBDIGGING LOG</div>
                 <div className="flex-1 min-h-0 overflow-hidden relative">
@@ -1710,6 +1741,17 @@ function MainApp() {
           </filter>
         </defs>
       </svg>
+
+      {/* Interactive Tutorial Guide Overlay */}
+      <TutorialOverlay 
+        isOpen={isTutorialOpen} 
+        onClose={() => setIsTutorialOpen(false)} 
+        setMode={setMode}
+        setExploreTab={setExploreTab}
+        allGenresMeta={allGenresMeta}
+        handleNodeClick={handleNodeClick}
+        resetToHome={resetToHome}
+      />
     </>
   );
 }

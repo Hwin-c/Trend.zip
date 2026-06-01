@@ -183,6 +183,23 @@ export const Constellation: React.FC<ConstellationProps> = ({ nodes, centerNode,
 
   // Generate Data for ForceGraph
   const graphData = useMemo(() => {
+    // D3 물리 연속성을 보존하기 위한 이전 프레임 좌표/벡터 상속 맵 구축 (초기 마운트 런타임 크래시 완전 방지)
+    const prevNodesMap = new Map<string, any>();
+    if (fgRef.current && typeof fgRef.current.graphData === 'function') {
+      try {
+        const currentGraphData = fgRef.current.graphData();
+        if (currentGraphData && Array.isArray(currentGraphData.nodes)) {
+          currentGraphData.nodes.forEach((n: any) => {
+            if (n && n.id) {
+              prevNodesMap.set(String(n.id), { x: n.x, y: n.y, vx: n.vx, vy: n.vy });
+            }
+          });
+        }
+      } catch (err) {
+        console.warn("D3 force simulation graphData not fully initialized yet:", err);
+      }
+    }
+
     // 1. Calculate projected coords for all nodes using Multidimensional Radial Projection (MDRP) of 6D audio features
     const projectedCoords = nodes.map(n => {
       const f = n.audioFeatures || (n as any).features || n.trackSnapshot?.features || (n.trackSnapshot as any)?.audio_features;
@@ -367,24 +384,32 @@ export const Constellation: React.FC<ConstellationProps> = ({ nodes, centerNode,
         }
       }
 
-      // 초기 유영 시작 지점을 중앙 및 우측 영역으로 유도
-      let initialX = coords.fx;
-      let initialY = coords.fy;
+      // D3 물리 관성 좌표 상속 시도 (존재 시 난수 덮어쓰기 완전 방지)
+      const prevNode = n.id ? prevNodesMap.get(String(n.id)) : null;
+      
+      let initialX = prevNode ? prevNode.x : coords.fx;
+      let initialY = prevNode ? prevNode.y : coords.fy;
+
       if (shouldPin) {
         initialX = fx;
         initialY = fy;
-      } else if (centerNode && centerNode.type === 'sub_genre' && n.type === 'song') {
-        initialX = dimensions.width / 8 + (Math.random() - 0.2) * (dimensions.width / 3);
-        initialY = (Math.random() - 0.5) * (dimensions.height / 2);
-      } else if (centerNode && centerNode.type === 'big_genre' && n.type === 'sub_genre') {
-        initialX = dimensions.width / 8 + (Math.random() - 0.2) * (dimensions.width / 3);
-        initialY = (Math.random() - 0.5) * (dimensions.height / 2);
+      } else if (!prevNode) {
+        // 이전에 물리 시뮬레이션에 존재하지 않았던 신규 노드만 무작위 분포 유도
+        if (centerNode && centerNode.type === 'sub_genre' && n.type === 'song') {
+          initialX = dimensions.width / 8 + (Math.random() - 0.2) * (dimensions.width / 3);
+          initialY = (Math.random() - 0.5) * (dimensions.height / 2);
+        } else if (centerNode && centerNode.type === 'big_genre' && n.type === 'sub_genre') {
+          initialX = dimensions.width / 8 + (Math.random() - 0.2) * (dimensions.width / 3);
+          initialY = (Math.random() - 0.5) * (dimensions.height / 2);
+        }
       }
 
       return {
         ...n,
         x: initialX,
         y: initialY,
+        vx: prevNode ? prevNode.vx : undefined,
+        vy: prevNode ? prevNode.vy : undefined,
         fx: shouldPin ? fx : undefined,
         fy: shouldPin ? fy : undefined,
         fx_ideal: coords.fx, // Store the ideal coordinates
