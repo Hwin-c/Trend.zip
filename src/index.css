@@ -80,4 +80,66 @@ html, body, #root, .font-sans {
   scrollbar-width: none;
 }
 
+/* ==========================================================================
+   🌌 HULL COLOR 적응형 다크 텍스트 가독성 최적화 레이어 (.hull-tint-light)
+   ========================================================================== */
+
+/* 1. 텍스트 컬러 지능형 차콜 반전 */
+.hull-tint-light .text-white,
+.hull-tint-light h1,
+.hull-tint-light h2,
+.hull-tint-light h3,
+.hull-tint-light h4 {
+  color: #0A0F1D !important;
+}
+
+.hull-tint-light .text-white\/80 { color: rgba(10, 15, 29, 0.85) !important; }
+.hull-tint-light .text-white\/70 { color: rgba(10, 15, 29, 0.75) !important; }
+.hull-tint-light .text-white\/60 { color: rgba(10, 15, 29, 0.65) !important; }
+.hull-tint-light .text-white\/50 { color: rgba(10, 15, 29, 0.55) !important; }
+.hull-tint-light .text-white\/40 { color: rgba(10, 15, 29, 0.45) !important; }
+.hull-tint-light .text-white\/35 { color: rgba(10, 15, 29, 0.38) !important; }
+.hull-tint-light .text-white\/30 { color: rgba(10, 15, 29, 0.32) !important; }
+.hull-tint-light .text-white\/20 { color: rgba(10, 15, 29, 0.22) !important; }
+.hull-tint-light .text-white\/10 { color: rgba(10, 15, 29, 0.12) !important; }
+.hull-tint-light .text-white\/55 { color: rgba(10, 15, 29, 0.60) !important; }
+.hull-tint-light .text-slate-200 { color: #1E293B !important; }
+
+/* 2. 경계선 및 디바이더 투명화 대응 (검정색 투명도로 변환) */
+.hull-tint-light .border-white\/10 { border-color: rgba(0, 0, 0, 0.14) !important; }
+.hull-tint-light .border-white\/5  { border-color: rgba(0, 0, 0, 0.08) !important; }
+
+/* 3. 투명 배경 요소 대응 (검정색 투명도로 변환) */
+.hull-tint-light .bg-white\/5,
+.hull-tint-light .bg-white\/6 { background-color: rgba(0, 0, 0, 0.06) !important; }
+.hull-tint-light .bg-white\/2 { background-color: rgba(0, 0, 0, 0.03) !important; }
+.hull-tint-light .bg-white\/\[0\.03\] { background-color: rgba(0, 0, 0, 0.03) !important; }
+
+/* 4. Spotify 연동 버튼 및 연동된 텍스트가 강제 반전되지 않도록 예외 처리 */
+.hull-tint-light button.bg-\[\#1DB954\],
+.hull-tint-light button.bg-\[\#1DB954\] * {
+  color: #000000 !important;
+}
+
+/* ==========================================================================
+   🌌 Futuristic Cockpit 3D Bezel & Cyber Border 마감 고도화
+   ========================================================================== */
+
+/* 콕핏 3D 장비 하이테크 베젤 마감 스타일 */
+.hull-tint-light {
+  box-shadow: inset 0 0 25px rgba(0, 0, 0, 0.15) !important;
+}
+
+/* 패널 가장자리 엠보싱 내부 섀도우 및 Futuristic Cyber Border 경계선 */
+header.relative, div.relative, footer.relative {
+  border-color: rgba(255, 255, 255, 0.06) !important;
+  box-shadow: inset 0 0 35px rgba(0, 0, 0, 0.85);
+}
+
+/* Center Space Window 접경부 사이버 보더 글로우 효과 */
+.border-\[\#00FFFF\]\/10 {
+  border-color: rgba(0, 255, 255, 0.18) !important;
+  box-shadow: 0 0 15px rgba(0, 255, 255, 0.05), inset 0 0 20px rgba(0, 0, 0, 0.95) !important;
+}
+
 

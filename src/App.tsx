@@ -18,8 +18,11 @@ import { fetchTrackFromSpotify, fetchTracksFromSpotify, saveTrack, removeSavedTr
 import { parseArtists, isValidUrl } from './lib/utils';
 import { GlassPanel } from './components/GlassPanel';
 import spaceshipTexture from './assets/spaceship_texture.webp';
+import spaceshipTextureB from './assets/spaceship_texture_B.webp';
+import spaceshipTextureC from './assets/spaceship_texture_C.webp';
 import spaceNebulaBg from './assets/space_nebula_bg.webp';
 import { LandscapeGuide } from './components/LandscapeGuide';
+import { CockpitFrame } from './components/CockpitFrame';
 
 
 // SVG Icons
@@ -47,6 +50,123 @@ function MainApp() {
   const [showSubGenres, setShowSubGenres] = useState<boolean>(false);
   const [currentNode, setCurrentNode] = useState<NodeData | null>(null);
   const { addToLog, clearLog } = useDigging();
+
+  // 프리셋 테마 RGB 정의 테이블
+  const THEME_PRESETS = useMemo(() => ({
+    cyan: '0, 255, 255',
+    purple: '176, 38, 255',
+    amber: '255, 140, 0',
+    green: '0, 255, 102',
+  }), []);
+
+  // 1. 테마 모드 영속화 세션 로드 (기본값: 'original')
+  const [hullThemeMode, setHullThemeMode] = useState<'original' | 'cyan' | 'purple' | 'amber' | 'green' | 'custom'>(() => {
+    const saved = localStorage.getItem('dbdigging_hull_theme_mode');
+    return (saved === 'original' || saved === 'cyan' || saved === 'purple' || saved === 'amber' || saved === 'green' || saved === 'custom') ? saved : 'original';
+  });
+
+  // 2. 커스텀 RGB 상태 로드 (기본값: '255, 0, 175' - 네온 핫핑크)
+  const [customRgb, setCustomRgb] = useState<string>(() => {
+    return localStorage.getItem('dbdigging_custom_rgb') || '255, 0, 175';
+  });
+
+  // 3. activeRgb 텍스트 실시간 계산
+  const activeRgb = useMemo(() => {
+    if (hullThemeMode === 'custom') {
+      return customRgb;
+    }
+    if (hullThemeMode === 'original') {
+      return '0, 0, 0';
+    }
+    return THEME_PRESETS[hullThemeMode] || THEME_PRESETS.cyan;
+  }, [hullThemeMode, customRgb, THEME_PRESETS]);
+
+  // 실시간 밝기(Luminance) 판별
+  const isLightHull = useMemo(() => {
+    if (hullThemeMode === 'original') return false; // 원본 메탈은 차분한 어두운 톤이므로 흰 글씨 유지
+    const rgbValues = activeRgb.split(',').map(Number);
+    if (rgbValues.length !== 3 || rgbValues.some(isNaN)) return false;
+    const [r, g, b] = rgbValues;
+    
+    // W3C 표준 relative luminance/brightness 공식
+    const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+    return brightness > 150; // 밝기 150을 기준으로 텍스트 색 전환 결정
+  }, [activeRgb, hullThemeMode]);
+
+  // 패턴 테마 로컬스토리지 바인딩
+  const [patternTheme, setPatternTheme] = useState<'default' | 'pattern_b' | 'pattern_c'>(() => {
+    const saved = localStorage.getItem('dbdigging_pattern_theme');
+    return (saved === 'default' || saved === 'pattern_b' || saved === 'pattern_c') ? saved : 'default';
+  });
+
+  // 활성화된 텍스처 리소스 매칭
+  const activeTexture = useMemo(() => {
+    switch (patternTheme) {
+      case 'pattern_b': return spaceshipTextureB;
+      case 'pattern_c': return spaceshipTextureC;
+      default: return spaceshipTexture;
+    }
+  }, [patternTheme]);
+
+  // 콕핏 패널 외벽 스타일 생성 헬퍼 (마감 섀도우 및 보더 트랜지션 확장)
+  const getHullStyle = useCallback((gridStyles: React.CSSProperties) => {
+    const baseStyle: React.CSSProperties = {
+      ...gridStyles,
+      backgroundImage: `url(${activeTexture})`,
+      backgroundRepeat: 'repeat',
+      backgroundSize: '512px 512px', // 512px * 512px 텍스처 규격 통일
+      boxShadow: 'inset 0 0 25px rgba(0, 0, 0, 0.75)', // 입체감 있는 메탈 엠보싱 마감 효과 추가
+      transition: 'background-color 0.5s ease, background-image 0.3s ease, color 0.5s ease, border-color 0.5s ease',
+    };
+
+    if (hullThemeMode === 'original') {
+      return baseStyle;
+    }
+
+    return {
+      ...baseStyle,
+      backgroundColor: `rgba(${activeRgb}, 0.22)`, // 연하고 부드러운 틴트로 변경
+      backgroundBlendMode: 'overlay',
+    };
+  }, [hullThemeMode, activeRgb, activeTexture]);
+
+  // 스킨 테마 변경 핸들러
+  const handleThemeModeChange = (mode: 'original' | 'cyan' | 'purple' | 'amber' | 'green' | 'custom') => {
+    setHullThemeMode(mode);
+    localStorage.setItem('dbdigging_hull_theme_mode', mode);
+    
+    const modeNames = { 
+      original: '오리지널 메탈', 
+      cyan: '네온 사이언', 
+      purple: '사이버 퍼플', 
+      amber: '솔라 엠버', 
+      green: '매트릭스 그린', 
+      custom: '사용자 지정' 
+    };
+    showToast(`조종선 테마를 [${modeNames[mode]}] 색채로 튜닝했습니다.`, 'info');
+  };
+
+  // 패턴 변경 핸들러
+  const handlePatternChange = (pattern: 'default' | 'pattern_b' | 'pattern_c') => {
+    setPatternTheme(pattern);
+    localStorage.setItem('dbdigging_pattern_theme', pattern);
+    
+    const patternNames = { default: '패턴A', pattern_b: '패턴B', pattern_c: '패턴C' };
+    showToast(`조종선 텍스처를 [${patternNames[pattern]}]으로 스왑했습니다.`, 'info');
+  };
+
+  // 커스텀 컬러 피커 변경 핸들러 (Hex to RGB 파싱 후 바인딩)
+  const handleCustomColorChange = (hexColor: string) => {
+    const r = parseInt(hexColor.slice(1, 3), 16);
+    const g = parseInt(hexColor.slice(3, 5), 16);
+    const b = parseInt(hexColor.slice(5, 7), 16);
+    const rgbString = `${r}, ${g}, ${b}`;
+    
+    setCustomRgb(rgbString);
+    setHullThemeMode('custom');
+    localStorage.setItem('dbdigging_hull_theme_mode', 'custom');
+    localStorage.setItem('dbdigging_custom_rgb', rgbString);
+  };
 
   const [homeTrending, setHomeTrending] = useState<TrackSnapshot[]>([]);
   const [chartViewMode, setChartViewMode] = useState<'list' | 'player'>('list');
@@ -1048,430 +1168,442 @@ function MainApp() {
   }
 
   return (
-    <div 
-      className="w-screen h-screen bg-[#050505] text-white overflow-hidden font-sans selection:bg-[#B026FF]/30 grid relative box-border transition-all duration-500"
-      style={{
-        gridTemplateColumns: '380px 1fr 320px',
-        gridTemplateRows: '80px 1fr 80px',
-      }}
-    >
-      {/* Row 1: Top HUD & Header */}
-      <motion.header 
-        initial={{ y: -80, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ type: 'spring', stiffness: 80, damping: 15, delay: 0.1 }}
-        className="relative z-30 flex items-center justify-between px-8 box-border select-none border-b border-white/10"
-        style={{
-          gridRow: '1',
-          gridColumn: '1 / span 3',
-          backgroundImage: `url(${spaceshipTexture})`,
-          backgroundRepeat: 'repeat',
-          backgroundSize: '200px 200px',
-        }}
-      >
-        <div className="flex items-center gap-10">
-          <h1 className="text-xl font-serif tracking-widest cursor-pointer" onClick={resetToHome}>DBDIGGING</h1>
-          <div className="flex items-center gap-2 text-sm text-white/50 font-mono">
-            {mode !== 'home' && (
-              <>
-                <button onClick={resetToHome} className="hover:text-white transition-colors uppercase">시작</button>
-                <span>&gt;</span>
-                <button onClick={() => { setCurrentNode(null); setDeepTracks([]); }} className="hover:text-white transition-colors uppercase">
-                  {mode === 'explore' ? '탐색' : mode}
-                </button>
-              </>
-            )}
-            {currentNode && currentNode.type !== 'spaceship' && (
-              <>
-                {currentNode.parentGenre && currentNode.type !== 'big_genre' && (
+    <>
+      <CockpitFrame
+        isLightHull={isLightHull}
+        getHullStyle={getHullStyle}
+        headerSlot={
+          <>
+            <div className="flex items-center gap-10">
+              <h1 className="text-xl font-serif tracking-widest cursor-pointer" onClick={resetToHome}>DBDIGGING</h1>
+              <div className="flex items-center gap-2 text-sm text-white/50 font-mono">
+                {mode !== 'home' && (
                   <>
+                    <button onClick={resetToHome} className="hover:text-white transition-colors uppercase">시작</button>
                     <span>&gt;</span>
-                    <button
-                      onClick={() => handleRestoreParentNode(currentNode.parentGenre)}
-                      className="hover:text-white transition-colors uppercase"
-                    >
-                      {currentNode.parentGenre}
+                    <button onClick={() => { setCurrentNode(null); setDeepTracks([]); }} className="hover:text-white transition-colors uppercase">
+                      {mode === 'explore' ? '탐색' : mode}
                     </button>
                   </>
                 )}
-                <span>&gt;</span>
-                <span className="text-white uppercase">{currentNode.name}</span>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-6">
-          <div ref={searchRef} className="relative hidden md:flex items-center">
-            <div className="absolute left-4 text-white/50"><SearchIcon /></div>
-            <input
-              type="text"
-              placeholder="Search genre or track..."
-              value={searchQuery}
-              onChange={(e) => { setSearchQuery(e.target.value); setSearchOpen(true); }}
-              onFocus={() => setSearchOpen(true)}
-              className="bg-[#1A1A1A] text-white placeholder-white/40 text-sm rounded-full pl-11 pr-4 py-2 outline-none focus:bg-[#252525] transition-all w-[240px] border border-white/5"
-            />
-            {searchOpen && searchQuery.trim() && (
-              <SearchDropdown
-                query={searchQuery}
-                genres={allGenresMeta}
-                cachedGenres={cachedGenres}
-                onSelectGenre={handleSearchSelectGenre}
-                onSelectTrack={handleSearchSelectTrack}
-                onClose={() => setSearchOpen(false)}
-              />
-            )}
-          </div>
-          <div className="flex items-center gap-4">
-            <button
-              onClick={handleSpotifyLogin}
-              className={`text-xs font-medium rounded-full px-4 py-2 flex items-center gap-2 transition-colors ${spotifyLoggedIn
-                  ? 'bg-[#1DB954] text-black hover:bg-[#1ed760]'
-                  : 'bg-[#1DB954] text-black hover:bg-[#1ed760]'
-                }`}
-            >
-              <SpotifyIcon /> {spotifyLoggedIn ? `Connected${spotifyProfile?.display_name ? ` (${spotifyProfile.display_name})` : ' ✓'}` : 'Connect to Spotify'}
-            </button>
-          </div>
-        </div>
-      </motion.header>
-
-      {/* Row 2, Column 1: Left Panel Zone */}
-      <motion.div 
-        initial={{ x: -380, opacity: 0 }}
-        animate={{ x: 0, opacity: 1 }}
-        transition={{ type: 'spring', stiffness: 70, damping: 14 }}
-        className="relative flex flex-col justify-start min-h-0 border-r border-white/10"
-        style={{
-          gridRow: '2',
-          gridColumn: '1',
-          backgroundImage: `url(${spaceshipTexture})`,
-          backgroundRepeat: 'repeat',
-          backgroundSize: '200px 200px',
-          padding: '12px',
-        }}
-      >
-        {mode === 'home' ? (
-          <GlassPanel className="w-full h-full text-white z-20 shadow-2xl flex flex-col justify-start overflow-hidden p-4">
-            <div className="text-[10px] text-[#00FFFF] mb-1.5 font-mono tracking-widest uppercase">COCKPIT PLAYLIST</div>
-            <h2 className="text-xl font-bold mb-0.5 truncate leading-tight">Trending Playlist</h2>
-            <div className="text-xs text-white/40 mb-4 truncate">인기 곡 - 대한민국 (Top Songs)</div>
-            <div className="flex-1 w-full rounded-2xl overflow-hidden border border-[#00FFFF]/20 bg-black/60 shadow-[inset_0_0_15px_rgba(0,0,0,0.8)] relative">
-              <iframe 
-                data-testid="embed-iframe" 
-                style={{ borderRadius: '16px', border: 'none' }} 
-                src={`https://open.spotify.com/embed/playlist/${extractPlaylistId(import.meta.env.VITE_SPOTIFY_PLAYLIST_URL)}?utm_source=generator`}
-                width="100%" 
-                height="100%" 
-                allowFullScreen={true} 
-                allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" 
-                loading="lazy"
-              />
+                {currentNode && currentNode.type !== 'spaceship' && (
+                  <>
+                    {currentNode.parentGenre && currentNode.type !== 'big_genre' && (
+                      <>
+                        <span>&gt;</span>
+                        <button
+                          onClick={() => handleRestoreParentNode(currentNode.parentGenre)}
+                          className="hover:text-white transition-colors uppercase"
+                        >
+                          {currentNode.parentGenre}
+                        </button>
+                      </>
+                    )}
+                    <span>&gt;</span>
+                    <span className="text-white uppercase">{currentNode.name}</span>
+                  </>
+                )}
+              </div>
             </div>
-          </GlassPanel>
-        ) : (
-          <AnimatePresence mode="wait">
-            <motion.div 
-              key={currentNode?.id || 'root'} 
-              initial={{ opacity: 0, x: -20 }} 
-              animate={{ opacity: 1, x: 0 }} 
-              exit={{ opacity: 0, x: -20 }} 
-              className="h-full w-full"
-            >
-              <LeftPanel
-                type={leftPanelProps.type}
-                title={leftPanelProps.title}
-                subtitle={leftPanelProps.subtitle}
-                items={leftPanelProps.items}
-                onItemClick={leftPanelProps.onItemClick}
-                trackInfo={leftPanelProps.trackInfo}
-                isSpotifyLoggedIn={leftPanelProps.isSpotifyLoggedIn}
-                isLiked={leftPanelProps.isLiked}
-                onLike={leftPanelProps.onLike}
-                onAddToPlaylist={leftPanelProps.onAddToPlaylist}
-                exploreTab={mode === 'explore' ? exploreTab : undefined}
-                setExploreTab={setExploreTab}
-                showSubGenres={showSubGenres}
-                onToggleSubGenres={handleToggleSubGenres}
-                isExploreDeep={mode === 'explore' && currentNode !== null}
-                isLoadingSubGenres={isLoadingSubGenres}
-                showTabSwitcher={leftPanelProps.showTabSwitcher}
-                showSubGenreToggle={leftPanelProps.showSubGenreToggle}
-              />
-            </motion.div>
-          </AnimatePresence>
-        )}
-      </motion.div>
 
-      {/* Row 2, Column 2: Center Space Window */}
-      <div 
-        className="relative h-full overflow-hidden min-h-0 flex items-center justify-center transition-all duration-500"
-        style={{
-          gridRow: '2',
-          gridColumn: '2',
-          backgroundImage: `url(${spaceNebulaBg})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-        }}
-      >
-        {/* Optics Compensation Adjustment Layer (After Effects의 보정 레이어 모방) */}
-        <div 
-          className="absolute inset-0 w-full h-full overflow-hidden flex items-center justify-center"
-          style={{
-            filter: fovScale !== 0 ? 'url(#optics-compensation-warp)' : 'none',
-            willChange: fovScale !== 0 ? 'filter' : 'auto',
-          }}
-        >
-          {/* Glassmorphic Background Blur Layer (Behind Constellation) */}
-          <div 
-            className="absolute inset-0 z-0 pointer-events-none transition-all duration-500"
-            style={{
-              backgroundColor: mode === 'home' ? 'rgba(0, 0, 0, 0.25)' : 'rgba(0, 0, 0, 0.4)',
-              backdropFilter: mode === 'home' ? 'blur(2px)' : 'blur(12px)',
-              WebkitBackdropFilter: mode === 'home' ? 'blur(2px)' : 'blur(12px)',
-            }}
-          />
+            <div className="flex items-center gap-6">
+              {/* Sleek cybernetic 테마 PATTERN & COLOR control console */}
+              <div className="flex items-center gap-4 bg-black/40 border border-white/10 rounded-full px-3 py-1.5 backdrop-blur-md">
+                {/* 테마 PATTERN selector */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono tracking-wider text-white/55">테마:</span>
+                  <div className="flex bg-black/60 rounded-full p-0.5 border border-white/5">
+                    {(['default', 'pattern_b', 'pattern_c'] as const).map((p) => (
+                      <button
+                        key={p}
+                        onClick={() => handlePatternChange(p)}
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-mono transition-all duration-300 ${
+                          patternTheme === p 
+                            ? 'bg-[#B026FF] text-white shadow-[0_0_10px_rgba(176,38,255,0.5)] font-bold' 
+                            : 'text-white/40 hover:text-white'
+                        }`}
+                      >
+                        {p === 'default' ? '패턴A' : p === 'pattern_b' ? '패턴B' : '패턴C'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-          {/* D3 Constellation Star Map wrapped in interactive z-indexed container with hyperdrive warp zoom/rotate vortex */}
-          <div 
-            className={`relative z-[5] w-full h-full flex items-center justify-center transition-all duration-[1600ms] ease-in-out pointer-events-auto ${mode === 'home' ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
-            style={{
-              opacity: isTransitioning ? 0 : undefined,
-              transform: isTransitioning ? 'scale(2.4)' : 'scale(1)',
-              filter: isTransitioning ? 'blur(4px)' : 'blur(0px)',
-            }}
-          >
-            <Constellation
-              nodes={displayNodes}
-              centerNode={currentNode || undefined}
-              onNodeClick={handleNodeClick}
-              activeNodeId={currentNode?.id}
-              onPositionsSettled={handlePositionsSettled}
-              showSubGenres={showSubGenres}
-            />
-          </div>
+                <div className="h-3 w-[1px] bg-white/10" />
 
-          {/* 웰컴/홈 오버레이 뷰 (mode === 'home') with hyperdrive zoom out transition */}
-          {mode === 'home' && (
-            <div 
-              className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/15 transition-all duration-[800ms] ease-in"
-              style={{
-                opacity: isTransitioning ? 0 : 1,
-                transform: isTransitioning ? 'scale(1.25) translateY(20px)' : 'scale(1) translateY(0px)',
-                filter: isTransitioning ? 'blur(3px)' : 'blur(0px)',
-              }}
-            >
-              <div className="text-center pointer-events-auto max-w-xl px-6 flex flex-col items-center gap-7 animate-fade-in">
-                <h2 className="text-3xl md:text-4xl font-extrabold leading-tight tracking-wide drop-shadow-[0_4px_16px_rgba(0,0,0,0.95)]">
-                  알고리즘을 벗어나,<br />당신만의 음악 우주를 탐험하세요.
-                </h2>
-                <button 
-                  onClick={() => startExploreMode('genre')} 
-                  className="px-10 py-4.5 rounded-full border-2 border-[#B026FF] bg-[#2A0845]/85 text-white font-bold text-base hover:bg-[#B026FF]/40 hover:shadow-[0_0_35px_rgba(176,38,255,0.85)] hover:scale-105 transition-all duration-300 backdrop-blur-md cursor-pointer"
+                {/* COLOR selector */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono tracking-wider text-white/55">색상:</span>
+                  <div className="flex gap-1.5 items-center">
+                    {(['original', 'cyan', 'purple', 'amber', 'green'] as const).map((theme) => {
+                      const themeColors: Record<string, string> = {
+                        original: 'bg-zinc-500 border-zinc-400',
+                        cyan: 'bg-[#00FFFF] border-[#00E5E5]',
+                        purple: 'bg-[#B026FF] border-[#9900FF]',
+                        amber: 'bg-[#FF8C00] border-[#E57C00]',
+                        green: 'bg-[#00FF66] border-[#00E55C]',
+                      };
+                      return (
+                        <button
+                          key={theme}
+                          onClick={() => handleThemeModeChange(theme)}
+                          className={`w-3.5 h-3.5 rounded-full border transition-all duration-300 hover:scale-125 ${themeColors[theme]} ${
+                            hullThemeMode === theme 
+                              ? 'scale-110 ring-2 ring-white/50 shadow-[0_0_8px_rgba(255,255,255,0.4)]' 
+                              : 'opacity-60'
+                          }`}
+                          title={theme}
+                        />
+                      );
+                    })}
+                    
+                    {/* Custom color picker */}
+                    <div className="relative flex items-center">
+                      <input 
+                        type="color" 
+                        onChange={(e) => handleCustomColorChange(e.target.value)}
+                        className="absolute inset-0 opacity-0 w-3.5 h-3.5 cursor-pointer z-10"
+                        title="Custom Color"
+                      />
+                      <div className={`w-3.5 h-3.5 rounded-full bg-gradient-to-tr from-rose-500 via-yellow-500 to-indigo-500 border border-white/20 hover:scale-125 transition-all ${
+                        hullThemeMode === 'custom' 
+                          ? 'scale-110 ring-2 ring-white/50' 
+                          : 'opacity-60'
+                      }`} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div ref={searchRef} className="relative hidden md:flex items-center">
+                <div className="absolute left-4 text-white/50"><SearchIcon /></div>
+                <input
+                  type="text"
+                  placeholder="Search genre or track..."
+                  value={searchQuery}
+                  onChange={(e) => { setSearchQuery(e.target.value); setSearchOpen(true); }}
+                  onFocus={() => setSearchOpen(true)}
+                  className="bg-[#1A1A1A] text-white placeholder-white/40 text-sm rounded-full pl-11 pr-4 py-2 outline-none focus:bg-[#252525] transition-all w-[240px] border border-white/5"
+                />
+                {searchOpen && searchQuery.trim() && (
+                  <SearchDropdown
+                    query={searchQuery}
+                    genres={allGenresMeta}
+                    cachedGenres={cachedGenres}
+                    onSelectGenre={handleSearchSelectGenre}
+                    onSelectTrack={handleSearchSelectTrack}
+                    onClose={() => setSearchOpen(false)}
+                  />
+                )}
+              </div>
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={handleSpotifyLogin}
+                  className="text-xs font-medium rounded-full px-4 py-2 flex items-center gap-2 transition-colors bg-[#1DB954] text-black hover:bg-[#1ed760]"
                 >
-                  장르별 음악 탐색 시작
+                  <SpotifyIcon /> {spotifyLoggedIn ? `Connected${spotifyProfile?.display_name ? ` (${spotifyProfile.display_name})` : ' ✓'}` : 'Connect to Spotify'}
                 </button>
               </div>
             </div>
-          )}
-        </div>
-
-        {/* Cockpit Glass Window HUD Overlay (Always visible to maximize cockpit UI consistency) */}
-        <div 
-          className="absolute inset-0 z-10 pointer-events-none border border-[#00FFFF]/20 rounded-[24px] overflow-hidden shadow-[inset_0_0_80px_rgba(0,0,0,0.85)]"
-        >
-          {/* Glass shine diagonal line */}
-          <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/[0.035] to-transparent" />
-          
-          {/* HUD Corner Reticles / Grid Guide Lines */}
-          <div className="absolute inset-4 border border-[#00FFFF]/10 rounded-[16px]">
-            {/* Corner brackets */}
-            <div className="absolute top-4 left-4 w-6 h-6 border-t-2 border-l-2 border-[#00FFFF]/25 rounded-tl" />
-            <div className="absolute top-4 right-4 w-6 h-6 border-t-2 border-r-2 border-[#00FFFF]/25 rounded-tr" />
-            <div className="absolute bottom-4 left-4 w-6 h-6 border-b-2 border-l-2 border-[#00FFFF]/25 rounded-bl" />
-            <div className="absolute bottom-4 right-4 w-6 h-6 border-b-2 border-r-2 border-[#00FFFF]/25 rounded-br" />
-
-            {/* Cockpit HUD indicators */}
-            <div className="absolute top-6 left-8 font-mono text-[9px] text-[#00FFFF]/55 tracking-wider leading-relaxed">
-              SYS: {mode === 'home' ? 'STANDBY' : 'ACTIVE'}<br />
-              NAV: {mode === 'home' ? 'INITIALIZING' : 'CONSTELLATION_MAP'}
-            </div>
-            <div className="absolute top-6 right-8 font-mono text-[9px] text-[#00FFFF]/55 tracking-wider text-right leading-relaxed">
-              RADAR: 360° SENSING<br />
-              SIG: {spotifyLoggedIn ? 'CONNECTED' : 'STANDBY'}
-            </div>
-            <div className="absolute bottom-6 left-8 font-mono text-[9px] text-[#B026FF]/55 tracking-wider leading-relaxed">
-              DEEP DIVE: {mode === 'home' ? 'STANDBY' : 'READY'}<br />
-              HULL: 100%
-            </div>
-            <div className="absolute bottom-6 right-8 font-mono text-[9px] text-[#B026FF]/55 tracking-wider text-right leading-relaxed">
-              AUTO-DECODE: ON<br />
-              COCKPIT MODE
-            </div>
-          </div>
-        </div>
-
-        {/* Immersive Local Space Hyperdrive Warp Transition Overlay (Cockpit Glass Internal Vortex) */}
-        <AnimatePresence>
-          {isTransitioning && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ 
-                opacity: [0, 1, 1, 0],
-              }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 1.8, ease: "easeInOut" }}
-              className="absolute inset-0 z-[12] bg-[#050505]/20 pointer-events-none flex items-center justify-center overflow-hidden"
-            >
-              {/* Warp Core Ring 1 */}
-              <motion.div
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{ 
-                  scale: [0.8, 2.2, 3.8],
-                  opacity: [0, 0.85, 0] 
-                }}
-                transition={{ duration: 1.5, ease: "easeOut" }}
-                className="absolute w-[80%] h-[80%] rounded-full border-2 border-[#00FFFF]/35 flex items-center justify-center shadow-[0_0_60px_rgba(0,255,255,0.4)]"
-              >
-                <div className="w-[85%] h-[85%] rounded-full border border-dashed border-[#B026FF]/25" />
-              </motion.div>
-
-              {/* Warp Core Ring 2 */}
-              <motion.div
-                initial={{ scale: 0.4, opacity: 0 }}
-                animate={{ 
-                  scale: [0.4, 1.6, 2.8],
-                  opacity: [0, 0.7, 0] 
-                }}
-                transition={{ duration: 1.6, delay: 0.12, ease: "easeOut" }}
-                className="absolute w-[80%] h-[80%] rounded-full border border-[#B026FF]/45 flex items-center justify-center shadow-[0_0_40px_rgba(176,38,255,0.35)]"
-              >
-                <div className="w-[90%] h-[90%] rounded-full border border-dashed border-[#00FFFF]/15" />
-              </motion.div>
-
-              {/* Center hyper speed flash */}
+          </>
+        }
+        leftPanelSlot={
+          mode === 'home' ? (
+            <GlassPanel className="w-full h-full text-white z-20 shadow-2xl flex flex-col justify-start overflow-hidden p-4">
+              <div className="text-[10px] text-[#00FFFF] mb-1.5 font-mono tracking-widest uppercase">COCKPIT PLAYLIST</div>
+              <h2 className="text-xl font-bold mb-0.5 truncate leading-tight">Trending Playlist</h2>
+              <div className="text-xs text-white/40 mb-4 truncate">인기 곡 - 대한민국 (Top Songs)</div>
+              <div className="flex-1 w-full rounded-2xl overflow-hidden border border-[#00FFFF]/20 bg-black/60 shadow-[inset_0_0_15px_rgba(0,0,0,0.8)] relative">
+                <iframe 
+                  data-testid="embed-iframe" 
+                  style={{ borderRadius: '16px', border: 'none' }} 
+                  src={`https://open.spotify.com/embed/playlist/${extractPlaylistId(import.meta.env.VITE_SPOTIFY_PLAYLIST_URL)}?utm_source=generator`}
+                  width="100%" 
+                  height="100%" 
+                  allowFullScreen={true} 
+                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" 
+                  loading="lazy"
+                />
+              </div>
+            </GlassPanel>
+          ) : (
+            <AnimatePresence mode="wait">
               <motion.div 
-                initial={{ opacity: 0, scale: 0.1 }}
-                animate={{ 
-                  opacity: [0, 0.9, 0],
-                  scale: [0.1, 2.2, 4.0]
-                }}
-                transition={{ duration: 1.4, delay: 0.08 }}
-                className="absolute w-36 h-36 rounded-full bg-gradient-to-r from-[#00FFFF]/50 to-[#B026FF]/50 filter blur-[20px]"
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* Row 2, Column 3: Right Panel Zone (Radar Chart & DBDIGGING LOG) */}
-      <motion.div 
-        initial={{ x: 320, opacity: 0 }}
-        animate={{ x: 0, opacity: 1 }}
-        transition={{ type: 'spring', stiffness: 70, damping: 14 }}
-        className="relative flex flex-col justify-between gap-y-3 min-h-0 border-l border-white/10"
-        style={{
-          gridRow: '2',
-          gridColumn: '3',
-          backgroundImage: `url(${spaceshipTexture})`,
-          backgroundRepeat: 'repeat',
-          backgroundSize: '200px 200px',
-          padding: '12px',
-        }}
-      >
-        {/* Top: Right Panel (Radar Chart) */}
-        <div className="flex-1 min-h-0 flex flex-col justify-start">
-          <AnimatePresence mode="wait">
-            <motion.div 
-              key={currentNode?.id || 'root'} 
-              initial={{ opacity: 0, x: 20 }} 
-              animate={{ opacity: 1, x: 0 }} 
-              exit={{ opacity: 0, x: 20 }} 
-              className="h-full w-full"
+                key={currentNode?.id || 'root'} 
+                initial={{ opacity: 0, x: -20 }} 
+                animate={{ opacity: 1, x: 0 }} 
+                exit={{ opacity: 0, x: -20 }} 
+                className="h-full w-full"
+              >
+                <LeftPanel
+                  type={leftPanelProps.type}
+                  title={leftPanelProps.title}
+                  subtitle={leftPanelProps.subtitle}
+                  items={leftPanelProps.items}
+                  onItemClick={leftPanelProps.onItemClick}
+                  trackInfo={leftPanelProps.trackInfo}
+                  isSpotifyLoggedIn={leftPanelProps.isSpotifyLoggedIn}
+                  isLiked={leftPanelProps.isLiked}
+                  onLike={leftPanelProps.onLike}
+                  onAddToPlaylist={leftPanelProps.onAddToPlaylist}
+                  exploreTab={mode === 'explore' ? exploreTab : undefined}
+                  setExploreTab={setExploreTab}
+                  showSubGenres={showSubGenres}
+                  onToggleSubGenres={handleToggleSubGenres}
+                  isExploreDeep={mode === 'explore' && currentNode !== null}
+                  isLoadingSubGenres={isLoadingSubGenres}
+                  showTabSwitcher={leftPanelProps.showTabSwitcher}
+                  showSubGenreToggle={leftPanelProps.showSubGenreToggle}
+                />
+              </motion.div>
+            </AnimatePresence>
+          )
+        }
+        centerSlot={
+          <div 
+            className="w-full h-full relative overflow-hidden flex items-center justify-center"
+            style={{
+              backgroundImage: `url(${spaceNebulaBg})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+            }}
+          >
+            {/* Optics Compensation Adjustment Layer (After Effects의 보정 레이어 모방) */}
+            <div 
+              className="absolute inset-0 w-full h-full overflow-hidden flex items-center justify-center pointer-events-none"
+              style={{
+                filter: fovScale !== 0 ? 'url(#optics-compensation-warp)' : 'none',
+                willChange: fovScale !== 0 ? 'filter' : 'auto',
+              }}
             >
-              {mode === 'home' ? (
-                <GlassPanel className="w-full h-full text-white flex flex-col items-center justify-center border border-white/10 p-6 min-h-[220px]">
-                  <div className="flex flex-col items-center text-center gap-3.5">
-                    <div className="w-12 h-12 rounded-full border border-dashed border-[#B026FF]/40 flex items-center justify-center animate-spin" style={{ animationDuration: '10s' }}>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-[#B026FF] animate-pulse">
-                        <circle cx="12" cy="12" r="10" />
-                        <path d="M12 6v6l4 2" />
-                      </svg>
-                    </div>
-                    <span className="text-[12px] font-bold text-[#B026FF]/80 font-mono uppercase tracking-widest">COCKPIT READY</span>
-                    <span className="text-[11px] text-white/40 leading-relaxed font-sans">
-                      탐색선 분석 모듈 예열 완료.<br />음악 탐색을 가동하시면<br />실시간 레이더 오차 보정이 시작됩니다.
-                    </span>
+              {/* Glassmorphic Background Blur Layer (Behind Constellation) */}
+              <div 
+                className="absolute inset-0 z-0 pointer-events-none transition-all duration-500"
+                style={{
+                  backgroundColor: mode === 'home' ? 'rgba(0, 0, 0, 0.25)' : 'rgba(0, 0, 0, 0.4)',
+                  backdropFilter: mode === 'home' ? 'blur(2px)' : 'blur(12px)',
+                  WebkitBackdropFilter: mode === 'home' ? 'blur(2px)' : 'blur(12px)',
+                }}
+              />
+
+              {/* D3 Constellation Star Map wrapped in interactive z-indexed container with hyperdrive warp zoom/rotate vortex */}
+              <div 
+                className={`relative z-[5] w-full h-full flex items-center justify-center transition-all duration-[1600ms] ease-in-out pointer-events-auto ${mode === 'home' ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+                style={{
+                  opacity: isTransitioning ? 0 : undefined,
+                  transform: isTransitioning ? 'scale(2.4)' : 'scale(1)',
+                  filter: isTransitioning ? 'blur(4px)' : 'blur(0px)',
+                }}
+              >
+                <Constellation
+                  nodes={displayNodes}
+                  centerNode={currentNode || undefined}
+                  onNodeClick={handleNodeClick}
+                  activeNodeId={currentNode?.id}
+                  onPositionsSettled={handlePositionsSettled}
+                  showSubGenres={showSubGenres}
+                />
+              </div>
+
+              {/* 웰컴/홈 오버레이 뷰 (mode === 'home') with hyperdrive zoom out transition */}
+              {mode === 'home' && (
+                <div 
+                  className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/15 transition-all duration-[800ms] ease-in pointer-events-auto"
+                  style={{
+                    opacity: isTransitioning ? 0 : 1,
+                    transform: isTransitioning ? 'scale(1.25) translateY(20px)' : 'scale(1) translateY(0px)',
+                    filter: isTransitioning ? 'blur(3px)' : 'blur(0px)',
+                  }}
+                >
+                  <div className="text-center pointer-events-auto max-w-xl px-6 flex flex-col items-center gap-7 animate-fade-in">
+                    <h2 className="text-3xl md:text-4xl font-extrabold leading-tight tracking-wide drop-shadow-[0_4px_16px_rgba(0,0,0,0.95)] text-white">
+                      알고리즘을 벗어나,<br />당신만의 음악 우주를 탐험하세요.
+                    </h2>
+                    <button 
+                      onClick={() => startExploreMode('genre')} 
+                      className="px-10 py-4.5 rounded-full border-2 border-[#B026FF] bg-[#2A0845]/85 text-white font-bold text-base hover:bg-[#B026FF]/40 hover:shadow-[0_0_35px_rgba(176,38,255,0.85)] hover:scale-105 transition-all duration-300 backdrop-blur-md cursor-pointer"
+                    >
+                      장르별 음악 탐색 시작
+                    </button>
                   </div>
-                </GlassPanel>
-              ) : currentNode && currentNode.type === 'big_genre' && currentNode.audioFeatures ? (
-                <RightPanel 
-                  title={`${currentNode.name} 특성`} 
-                  subtitle="장르 평균 분석" 
-                  features={currentNode.audioFeatures} 
-                  featuresLabel="장르"
-                />
-              ) : currentNode && currentNode.type === 'sub_genre' && currentNode.audioFeatures ? (
-                <RightPanel 
-                  title={`${currentNode.name} 특성`} 
-                  subtitle="장르 평균 분석" 
-                  features={allGenresMeta.find(g => g.name === currentNode.parentGenre)?.average_audio_features || {}}
-                  compareFeatures={currentNode.audioFeatures}
-                  featuresLabel="장르"
-                  compareFeaturesLabel="하위 장르"
-                />
-              ) : currentNode && currentNode.type === 'song' && currentNode.audioFeatures ? (
-                <RightPanel title="곡 오디오 분석" subtitle={currentNode.trackSnapshot!.name}
-                  features={getParentGenreFeatures(currentNode.parentGenre) || {}}
-                  compareFeatures={currentNode.audioFeatures}
-                  featuresLabel={isSubGenre(currentNode.parentGenre) ? '하위 장르' : '장르'}
-                  compareFeaturesLabel="노래"
-                />
-              ) : (
-                <GlassPanel className="w-full h-full text-white flex flex-col items-center justify-center border border-white/10 p-6 min-h-[220px]">
-                  <div className="flex flex-col items-center text-center gap-3">
-                    <div className="w-12 h-12 rounded-full border border-dashed border-[#00FFFF]/40 flex items-center justify-center animate-spin" style={{ animationDuration: '6s' }}>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-[#00FFFF]">
-                        <path d="M12 2v20M2 12h20" />
-                        <circle cx="12" cy="12" r="10" />
-                      </svg>
-                    </div>
-                    <span className="text-[13px] font-bold text-[#00FFFF]/80 font-mono uppercase tracking-widest">RADAR SIGNAL WAITING</span>
-                    <span className="text-[11px] text-white/40 leading-relaxed font-sans">
-                      분석할 장르 또는 곡 노드를 클릭하여<br />오디오 육각형 시그널을 확인하세요.
-                    </span>
-                  </div>
-                </GlassPanel>
+                </div>
               )}
-            </motion.div>
-          </AnimatePresence>
-        </div>
-
-        {/* Bottom: DBDIGGING LOG */}
-        <GlassPanel className="w-full h-[25vh] min-h-[160px] text-white">
-          <div className="flex-1 min-h-0 w-full p-2 flex flex-col">
-            <div className="text-[10px] text-[#00FFFF] mb-1 font-mono tracking-widest uppercase">DBDIGGING LOG</div>
-            <div className="flex-1 min-h-0 overflow-hidden relative">
-              <Minimap />
             </div>
-          </div>
-        </GlassPanel>
-      </motion.div>
 
-      {/* Row 3: Bottom Console Frame */}
-      <motion.footer 
-        initial={{ y: 80, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ type: 'spring', stiffness: 70, damping: 14, delay: 0.15 }}
-        className="relative z-20 select-none border-t border-white/10"
-        style={{
-          gridRow: '3',
-          gridColumn: '1 / span 3',
-          backgroundImage: `url(${spaceshipTexture})`,
-          backgroundRepeat: 'repeat',
-          backgroundSize: '200px 200px',
-        }}
+            {/* Cockpit Glass Window HUD Overlay (Always visible to maximize cockpit UI consistency) */}
+            <div 
+              className="absolute inset-0 z-10 pointer-events-none border border-[#00FFFF]/20 rounded-[24px] overflow-hidden shadow-[inset_0_0_80px_rgba(0,0,0,0.85)]"
+            >
+              {/* Glass shine diagonal line */}
+              <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/[0.035] to-transparent" />
+              
+              {/* HUD Corner Reticles / Grid Guide Lines */}
+              <div className="absolute inset-4 border border-[#00FFFF]/10 rounded-[16px]">
+                {/* Corner brackets */}
+                <div className="absolute top-4 left-4 w-6 h-6 border-t-2 border-l-2 border-[#00FFFF]/25 rounded-tl" />
+                <div className="absolute top-4 right-4 w-6 h-6 border-t-2 border-r-2 border-[#00FFFF]/25 rounded-tr" />
+                <div className="absolute bottom-4 left-4 w-6 h-6 border-b-2 border-l-2 border-[#00FFFF]/25 rounded-bl" />
+                <div className="absolute bottom-4 right-4 w-6 h-6 border-b-2 border-r-2 border-[#00FFFF]/25 rounded-br" />
+
+                {/* Cockpit HUD indicators */}
+                <div className="absolute top-6 left-8 font-mono text-[9px] text-[#00FFFF]/55 tracking-wider leading-relaxed">
+                  SYS: {mode === 'home' ? 'STANDBY' : 'ACTIVE'}<br />
+                  NAV: {mode === 'home' ? 'INITIALIZING' : 'CONSTELLATION_MAP'}
+                </div>
+                <div className="absolute top-6 right-8 font-mono text-[9px] text-[#00FFFF]/55 tracking-wider text-right leading-relaxed">
+                  RADAR: 360° SENSING<br />
+                  SIG: {spotifyLoggedIn ? 'CONNECTED' : 'STANDBY'}
+                </div>
+                <div className="absolute bottom-6 left-8 font-mono text-[9px] text-[#B026FF]/55 tracking-wider leading-relaxed">
+                  DEEP DIVE: {mode === 'home' ? 'STANDBY' : 'READY'}<br />
+                  HULL: 100%
+                </div>
+                <div className="absolute bottom-6 right-8 font-mono text-[9px] text-[#B026FF]/55 tracking-wider text-right leading-relaxed">
+                  AUTO-DECODE: ON<br />
+                  COCKPIT MODE
+                </div>
+              </div>
+            </div>
+
+            {/* Immersive Local Space Hyperdrive Warp Transition Overlay (Cockpit Glass Internal Vortex) */}
+            <AnimatePresence>
+              {isTransitioning && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ 
+                    opacity: [0, 1, 1, 0],
+                  }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 1.8, ease: "easeInOut" }}
+                  className="absolute inset-0 z-[12] bg-[#050505]/20 pointer-events-none flex items-center justify-center overflow-hidden"
+                >
+                  {/* Warp Core Ring 1 */}
+                  <motion.div
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ 
+                      scale: [0.8, 2.2, 3.8],
+                      opacity: [0, 0.85, 0] 
+                    }}
+                    transition={{ duration: 1.5, ease: "easeOut" }}
+                    className="absolute w-[80%] h-[80%] rounded-full border-2 border-[#00FFFF]/35 flex items-center justify-center shadow-[0_0_60px_rgba(0,255,255,0.4)]"
+                  >
+                    <div className="w-[85%] h-[85%] rounded-full border border-dashed border-[#B026FF]/25" />
+                  </motion.div>
+
+                  {/* Warp Core Ring 2 */}
+                  <motion.div
+                    initial={{ scale: 0.4, opacity: 0 }}
+                    animate={{ 
+                      scale: [0.4, 1.6, 2.8],
+                      opacity: [0, 0.7, 0] 
+                    }}
+                    transition={{ duration: 1.6, delay: 0.12, ease: "easeOut" }}
+                    className="absolute w-[80%] h-[80%] rounded-full border border-[#B026FF]/45 flex items-center justify-center shadow-[0_0_40px_rgba(176,38,255,0.35)]"
+                  >
+                    <div className="w-[90%] h-[90%] rounded-full border border-dashed border-[#00FFFF]/15" />
+                  </motion.div>
+
+                  {/* Center hyper speed flash */}
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.1 }}
+                    animate={{ 
+                      opacity: [0, 0.9, 0],
+                      scale: [0.1, 2.2, 4.0]
+                    }}
+                    transition={{ duration: 1.4, delay: 0.08 }}
+                    className="absolute w-36 h-36 rounded-full bg-gradient-to-r from-[#00FFFF]/50 to-[#B026FF]/50 filter blur-[20px]"
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        }
+        rightPanelSlot={
+          <>
+            {/* Top: Right Panel (Radar Chart) */}
+            <div className="flex-1 min-h-0 flex flex-col justify-start">
+              <AnimatePresence mode="wait">
+                <motion.div 
+                  key={currentNode?.id || 'root'} 
+                  initial={{ opacity: 0, x: 20 }} 
+                  animate={{ opacity: 1, x: 0 }} 
+                  exit={{ opacity: 0, x: 20 }} 
+                  className="h-full w-full"
+                >
+                  {mode === 'home' ? (
+                    <GlassPanel className="w-full h-full text-white flex flex-col items-center justify-center border border-white/10 p-6 min-h-[220px]">
+                      <div className="flex flex-col items-center text-center gap-3.5">
+                        <div className="w-12 h-12 rounded-full border border-dashed border-[#B026FF]/40 flex items-center justify-center animate-spin" style={{ animationDuration: '10s' }}>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-[#B026FF] animate-pulse">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 6v6l4 2" />
+                          </svg>
+                        </div>
+                        <span className="text-[12px] font-bold text-[#B026FF]/80 font-mono uppercase tracking-widest">COCKPIT READY</span>
+                        <span className="text-[11px] text-white/40 leading-relaxed font-sans">
+                          탐색선 분석 모듈 예열 완료.<br />음악 탐색을 가동하시면<br />실시간 레이더 오차 보정이 시작됩니다.
+                        </span>
+                      </div>
+                    </GlassPanel>
+                  ) : currentNode && currentNode.type === 'big_genre' && currentNode.audioFeatures ? (
+                    <RightPanel 
+                      title={`${currentNode.name} 특성`} 
+                      subtitle="장르 평균 분석" 
+                      features={currentNode.audioFeatures} 
+                      featuresLabel="장르"
+                    />
+                  ) : currentNode && currentNode.type === 'sub_genre' && currentNode.audioFeatures ? (
+                    <RightPanel 
+                      title={`${currentNode.name} 특성`} 
+                      subtitle="장르 평균 분석" 
+                      features={allGenresMeta.find(g => g.name === currentNode.parentGenre)?.average_audio_features || {}}
+                      compareFeatures={currentNode.audioFeatures}
+                      featuresLabel="장르"
+                      compareFeaturesLabel="하위 장르"
+                    />
+                  ) : currentNode && currentNode.type === 'song' && currentNode.audioFeatures ? (
+                    <RightPanel title="곡 오디오 분석" subtitle={currentNode.trackSnapshot!.name}
+                      features={getParentGenreFeatures(currentNode.parentGenre) || {}}
+                      compareFeatures={currentNode.audioFeatures}
+                      featuresLabel={isSubGenre(currentNode.parentGenre) ? '하위 장르' : '장르'}
+                      compareFeaturesLabel="노래"
+                    />
+                  ) : (
+                    <GlassPanel className="w-full h-full text-white flex flex-col items-center justify-center border border-white/10 p-6 min-h-[220px]">
+                      <div className="flex flex-col items-center text-center gap-3">
+                        <div className="w-12 h-12 rounded-full border border-dashed border-[#00FFFF]/40 flex items-center justify-center animate-spin" style={{ animationDuration: '6s' }}>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-[#00FFFF]">
+                            <path d="M12 2v20M2 12h20" />
+                            <circle cx="12" cy="12" r="10" />
+                          </svg>
+                        </div>
+                        <span className="text-[13px] font-bold text-[#00FFFF]/80 font-mono uppercase tracking-widest">RADAR SIGNAL WAITING</span>
+                        <span className="text-[11px] text-white/40 leading-relaxed font-sans">
+                          분석할 장르 또는 곡 노드를 클릭하여<br />오디오 육각형 시그널을 확인하세요.
+                        </span>
+                      </div>
+                    </GlassPanel>
+                  )}
+                </motion.div>
+              </AnimatePresence>
+            </div>
+
+            {/* Bottom: DBDIGGING LOG */}
+            <GlassPanel className="w-full h-[25vh] min-h-[160px] text-white">
+              <div className="flex-1 min-h-0 w-full p-2 flex flex-col">
+                <div className="text-[10px] text-[#00FFFF] mb-1 font-mono tracking-widest uppercase">DBDIGGING LOG</div>
+                <div className="flex-1 min-h-0 overflow-hidden relative">
+                  <Minimap />
+                </div>
+              </div>
+            </GlassPanel>
+          </>
+        }
+        footerSlot={
+          <div className="w-full h-full flex items-center justify-center font-mono text-[10px] text-white/35 tracking-wider select-none">
+            🌌 DBDIGGING COCKPIT CONSOLE // STELLAR NAVIGATOR v1.4 // SYSTEM STABLE
+          </div>
+        }
       />
 
       {/* Playlist Modal */}
@@ -1541,7 +1673,7 @@ function MainApp() {
           </filter>
         </defs>
       </svg>
-    </div>
+    </>
   );
 }
 
