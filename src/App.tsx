@@ -528,8 +528,16 @@ function MainApp() {
               if (genre && genre.top_tracks) {
                 const updatedTracks = genre.top_tracks.map(track => {
                   const info = trackInfoMap[track.track_id];
-                  if (info?.album_art) {
-                    return { ...track, album_cover: info.album_art };
+                  if (info) {
+                    return { 
+                      ...track, 
+                      album_cover: info.album_art || track.album_cover,
+                      features: info.audio_features || track.features,
+                      energy: info.audio_features?.energy ?? track.energy,
+                      danceability: info.audio_features?.danceability ?? track.danceability,
+                      valence: info.audio_features?.valence ?? track.valence,
+                      popularity: info.popularity ?? (track as any).popularity
+                    };
                   }
                   return track;
                 });
@@ -574,8 +582,16 @@ function MainApp() {
             if (!prev || prev.id !== currentNodeId || prev.type !== 'sub_genre') return prev;
             const updatedTracks = (prev.topTracks || []).map(track => {
               const info = trackInfoMap[track.track_id];
-              if (info?.album_art) {
-                return { ...track, album_cover: info.album_art };
+              if (info) {
+                return { 
+                  ...track, 
+                  album_cover: info.album_art || track.album_cover,
+                  features: info.audio_features || track.features,
+                  energy: info.audio_features?.energy ?? track.energy,
+                  danceability: info.audio_features?.danceability ?? track.danceability,
+                  valence: info.audio_features?.valence ?? track.valence,
+                  popularity: info.popularity ?? (track as any).popularity
+                };
               }
               return track;
             });
@@ -849,19 +865,12 @@ function MainApp() {
     if (mode === 'home') return [];
 
     if (!currentNode) {
-      // Root View: Parent Genres (Limit to 20 for performance optimization)
-      // 중복 방지 캐시 필터링
-      let filteredParentGenres = allGenresMeta.filter(pg => !visitedStarIds.includes(pg.id));
-      
-      // 안전장치 폴백: 남은 장르가 5개 미만이면 세션 캐시 초기화
-      if (filteredParentGenres.length < 5) {
-        sessionStorage.removeItem('visited_star_ids');
-        setTimeout(() => setVisitedStarIds([]), 0);
-        filteredParentGenres = allGenresMeta;
-      }
+      // Root View: Parent Genres (All 30 parent genres represent core hub constellations)
+      // 대장르는 핵심 허브 지도이므로 방문 기록 필터링 없이 항상 100% 노출을 보장합니다.
+      const filteredParentGenres = allGenresMeta;
 
-      // 최대 표시 개수 제한
-      const limitCount = 20;
+      // 최대 표시 개수 제한 (총 30개 장르가 모두 표출될 수 있도록 30으로 세팅)
+      const limitCount = 30;
       const visibleParentGenres = filteredParentGenres.slice(0, limitCount);
 
       const nodes: NodeData[] = visibleParentGenres.map((pg) => {
@@ -906,47 +915,20 @@ function MainApp() {
 
       const parentData = currentNode.type === 'big_genre' ? cachedGenres.get(currentNode.id) : null;
 
-      if (exploreTab === 'genre') {
-        if (currentNode.type === 'big_genre') {
-          // Show Sub Genres
-          const sgs = parentData?.sub_genres_data || [];
-          const subGenreNodes = sgs.map((sg) => {
-            return {
-              id: sg.id, type: 'sub_genre', name: sg.name, parentGenre: currentNode.name,
-              x: (Math.random() - 0.5) * 600, y: (Math.random() - 0.5) * 600,
-              audioFeatures: sg.average_audio_features
-            };
-          });
-          return [
-            { id: currentNode.id, type: currentNode.type, name: currentNode.name, x: 0, y: 0 },
-            ...subGenreNodes
-          ] as NodeData[];
-        } else {
-          // Sub-genre: Show parent genre + 5 top tracks
-          const parentGenreMeta = allGenresMeta.find(
-            g => g.name.toLowerCase() === (currentNode.parentGenre || '').toLowerCase()
-          );
-          const parentNodeId = parentGenreMeta ? parentGenreMeta.id : 'parent_genre_node';
-
-          const parentNode: NodeData = {
-            id: parentNodeId, type: 'big_genre', name: currentNode.parentGenre || 'Parent Genre',
-            x: (Math.random() - 0.5) * 300, y: (Math.random() - 0.5) * 300
+      if (exploreTab === 'genre' && currentNode.type === 'big_genre') {
+        // Show Sub Genres
+        const sgs = parentData?.sub_genres_data || [];
+        const subGenreNodes = sgs.map((sg) => {
+          return {
+            id: sg.id, type: 'sub_genre', name: sg.name, parentGenre: currentNode.name,
+            x: (Math.random() - 0.5) * 600, y: (Math.random() - 0.5) * 600,
+            audioFeatures: sg.average_audio_features
           };
-          
-          const similarSongs = (currentNode.topTracks || []).slice(0, 5).map(t => ({
-            id: t.track_id, type: 'song', name: t.name,
-            x: (Math.random() - 0.5) * 300, y: (Math.random() - 0.5) * 300,
-            trackSnapshot: t,
-            audioFeatures: t.features || { energy: t.energy, danceability: t.danceability, valence: t.valence },
-            parentGenre: currentNode.name
-          })) as NodeData[];
-
-          return [
-            { id: currentNode.id, type: currentNode.type, name: currentNode.name, x: 0, y: 0 },
-            parentNode,
-            ...similarSongs
-          ];
-        }
+        });
+        return [
+          { id: currentNode.id, type: currentNode.type, name: currentNode.name, x: 0, y: 0 },
+          ...subGenreNodes
+        ] as NodeData[];
       } else {
         // Show top 25 Songs (Limit optimized) with popularity sorting & caching
         // If sub_genre, its topTracks are in currentNode.topTracks.
@@ -988,7 +970,7 @@ function MainApp() {
             x: (Math.random() - 0.5) * 600, y: (Math.random() - 0.5) * 600,
             trackSnapshot: t,
             // Bug 2 fix: DB top_tracks don't have .features, use individual fields as fallback
-            audioFeatures: t.features || { energy: t.energy, danceability: t.danceability, valence: t.valence },
+            audioFeatures: t.audio_features || t.features || { energy: t.energy, danceability: t.danceability, valence: t.valence },
             parentGenre: currentNode.name
           };
         });
@@ -1065,7 +1047,7 @@ function MainApp() {
             x: (Math.random() - 0.5) * 400,
             y: (Math.random() - 0.5) * 400,
             trackSnapshot: t,
-            audioFeatures: t.features || { energy: t.energy, danceability: t.danceability, valence: t.valence },
+            audioFeatures: t.audio_features || t.features || { energy: t.energy, danceability: t.danceability, valence: t.valence },
             parentGenre: parentGenreName
           });
         });
@@ -1098,7 +1080,7 @@ function MainApp() {
       return {
         type: 'root' as const,
         title: '대분류 장르 선택',
-        subtitle: '총 30개 장르를 탐험하고 오디오 육각형을 디깅하세요',
+        subtitle: '음악 장르를 선택하고 세부 장르 및 노래를 탐색하세요',
         items,
         onItemClick: handleNodeClick,
         showTabSwitcher: false,
@@ -1145,7 +1127,7 @@ function MainApp() {
         return {
           type: 'genre' as const,
           title: `${currentNode.name} 수록곡`,
-          subtitle: '인기곡을 장르 탐험선에 탑재하여 오디오 신호를 수신하세요',
+          subtitle: '세부 장르 및 노래를 탐색하세요',
           items,
           onItemClick: handleNodeClick,
           showTabSwitcher: true,
@@ -1169,7 +1151,7 @@ function MainApp() {
       return {
         type: 'genre' as const,
         title: `${currentNode.name} 하위 장르`,
-        subtitle: '하위 장르 소속 수록곡 신호 목록',
+        subtitle: '세부 장르의 노래를 탐색하세요',
         items,
         onItemClick: handleNodeClick,
         showTabSwitcher: false,

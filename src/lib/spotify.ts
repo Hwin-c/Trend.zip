@@ -16,6 +16,8 @@ export interface SpotifyTrackInfo {
   album_art: string;
   artists: string[];
   external_url: string;
+  popularity?: number;
+  audio_features?: any;
 }
 
 export async function fetchTrackFromSpotify(trackId: string): Promise<SpotifyTrackInfo | null> {
@@ -85,7 +87,9 @@ export async function fetchTrackFromSpotify(trackId: string): Promise<SpotifyTra
         preview_url: dbData.preview_url || null,
         album_art: dbData.album_cover || dbData.album_art || '',
         artists: parsedArtists,
-        external_url: `https://open.spotify.com/track/${cleanTrackId}`
+        external_url: `https://open.spotify.com/track/${cleanTrackId}`,
+        popularity: dbData.popularity ?? (dbData.popularity_score ?? 0),
+        audio_features: dbData.audio_features || null
       };
     }
   } catch (dbError) {
@@ -242,7 +246,10 @@ export async function fetchTracksFromSpotify(trackIds: string[]): Promise<Record
             preview_url: dbData.preview_url || null,
             album_art: dbData.album_cover || dbData.album_art || '',
             artists: parsedArtists,
-            external_url: `https://open.spotify.com/track/${tid}`
+            external_url: `https://open.spotify.com/track/${tid}`,
+            // DB 백업에서 복구할 때 인기도와 오디오 특징을 보존하여 0% 노출 오류 완벽 예방
+            popularity: dbData.popularity ?? (dbData.popularity_score ?? 0),
+            audio_features: dbData.audio_features || null
           };
         });
       }

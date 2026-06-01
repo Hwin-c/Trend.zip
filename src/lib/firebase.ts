@@ -109,18 +109,29 @@ export const fetchAllParentGenres = async (): Promise<ParentGenre[]> => {
     console.error("Error fetching all parent genres:", error);
     return [];
   }
-};export const fetchTracksByGenre = async (genreName: string, maxLimit: number = 20): Promise<Track[]> => {
+};
+
+export const fetchTracksByGenre = async (genreName: string, maxLimit: number = 20): Promise<Track[]> => {
   try {
     const tracksRef = collection(db, 'tracks');
-    // VITE_SPOTIFY_MIGRATION 완료 후, Firestore의 신규 'popularity' 필드로 내림차순 정렬
+    // 복합 색인 에러(The query requires an index)를 우회하기 위해 Firestore 쿼리 정렬을 걷어내고
+    // 클라이언트 메모리 레벨에서 정렬 및 슬라이싱을 수행하여 성능과 범용성을 극대화합니다.
     const q = query(
       tracksRef,
-      where("Genre_List", "array-contains", genreName),
-      orderBy("popularity", "desc"),
-      limit(maxLimit)
+      where("Genre_List", "array-contains", genreName)
     );
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ track_id: doc.id, ...doc.data() } as any as Track));
+    const tracks = snapshot.docs.map(doc => ({ track_id: doc.id, ...doc.data() } as any as Track));
+    
+    // 클라이언트 상에서 인기도순 내림차순 정렬 수행
+    tracks.sort((a, b) => {
+      const popA = (a as any).popularity ?? (a.popularity_score ?? 0);
+      const popB = (b as any).popularity ?? (b.popularity_score ?? 0);
+      return popB - popA;
+    });
+
+    // 요청된 limit 개수만큼 잘라서 반환
+    return tracks.slice(0, maxLimit);
   } catch (error) {
     console.error(`Error fetching tracks for genre ${genreName}:`, error);
     return [];

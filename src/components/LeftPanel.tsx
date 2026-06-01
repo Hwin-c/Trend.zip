@@ -170,30 +170,121 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
   showTabSwitcher = false, showSubGenreToggle = false
 }) => {
   const { hoveredNodeId, setHoveredNodeId } = useDigging();
-  const [sortBy, setSortBy] = React.useState<string>('popularity');
+  const checkIsGenreList = React.useCallback(() => {
+    if (type === 'root') return true;
+    if (type === 'genre') {
+      if (exploreTab !== undefined) {
+        return exploreTab === 'genre';
+      }
+    }
+    if (items.length > 0) {
+      return items.every(i => i.type === 'big_genre' || i.type === 'sub_genre');
+    }
+    return false;
+  }, [type, exploreTab, items]);
 
-  // 노래 리스트가 왼쪽에 뜰 때 동적 정렬 기준 적용 (이름, 인기도, 6대 음악적 특성)
+  const isGenreListInitial = React.useMemo(() => {
+    if (type === 'root') return true;
+    if (type === 'genre' && exploreTab === 'genre') return true;
+    if (items.length > 0 && items.every(i => i.type === 'big_genre' || i.type === 'sub_genre')) return true;
+    return false;
+  }, [type, exploreTab, items]);
+
+  const [sortBy, setSortBy] = React.useState<string>(() => {
+    return isGenreListInitial ? 'name' : 'popularity';
+  });
+  const [sortOrder, setSortOrder] = React.useState<'asc' | 'desc'>(() => {
+    return isGenreListInitial ? 'asc' : 'desc';
+  });
+
+  // items, type, exploreTab이 동적으로 변경되어 장르 목록 <-> 노래 목록으로 전환될 때 정렬 기준과 정렬 방향을 연동하여 자동 리셋합니다.
+  React.useEffect(() => {
+    const currentIsGenre = checkIsGenreList();
+    if (currentIsGenre) {
+      setSortBy('name');
+      setSortOrder('asc');
+    } else {
+      setSortBy('popularity');
+      setSortOrder('desc');
+    }
+  }, [items, type, exploreTab, checkIsGenreList]);
+
+  // 이름순(name) 정렬은 오름차순(asc)을 기본으로 하고, 수치형 정렬(인기도 및 6대 특징)은 내림차순(desc)을 기본 방향으로 자동 세팅합니다.
+  React.useEffect(() => {
+    if (sortBy === 'name') {
+      setSortOrder('asc');
+    } else {
+      setSortOrder('desc');
+    }
+  }, [sortBy]);
+
+  // 분류 기준(인기도 및 6대 특성)이 활성화되었을 때, 미니 육각형 바로 왼쪽에 고유 수치 값을 노출하는 뱃지 렌더러
+  const renderSortValue = (item: LeftPanelItem) => {
+    const isGenre = item.type === 'big_genre' || item.type === 'sub_genre';
+    const effectiveSortBy = sortBy === 'popularity' && isGenre ? 'name' : sortBy;
+
+    if (effectiveSortBy === 'name') return null;
+
+    let displayVal = '';
+    if (effectiveSortBy === 'popularity') {
+      if (isGenre) return null;
+      const pop = item.rawObject?.trackSnapshot?.popularity ?? 
+                  (item.rawObject?.trackSnapshot?.popularity_score ?? 
+                  (item.rawObject?.popularity ?? 
+                  (item.rawObject?.popularity_score ?? 
+                  (item.audioFeatures?.popularity ?? 0))));
+      // 0~5 범위의 스코어는 0~100 스케일로 예쁘게 보정
+      const popInt = pop <= 5 ? Math.round(pop * 20) : Math.round(pop);
+      displayVal = `${popInt}`;
+    } else {
+      const val = item.audioFeatures?.[effectiveSortBy] ?? 0;
+      displayVal = `${Math.round(val * 100)}%`;
+    }
+
+    return (
+      <span className="font-mono text-[10px] font-bold text-[#00FFFF]/90 bg-white/[0.04] border border-white/10 px-1.5 py-0.5 rounded-md mr-1.5 shrink-0 shadow-[0_0_8px_rgba(0,255,255,0.05)]">
+        {displayVal}
+      </span>
+    );
+  };
+
+  // 노래 리스트가 왼쪽에 뜰 때 동적 정렬 기준 및 오름차순/내림차순 정렬 적용
   const sortedItems = React.useMemo(() => {
-    if (exploreTab !== 'song') return items;
+    if (!items || items.length === 0) return [];
+
+    const isGenreList = items.every(i => i.type === 'big_genre' || i.type === 'sub_genre');
+    const effectiveSortBy = sortBy === 'popularity' && isGenreList ? 'name' : sortBy;
 
     const itemsCopy = [...items];
     return itemsCopy.sort((a, b) => {
-      if (sortBy === 'name') {
-        return a.name.localeCompare(b.name);
-      }
-      
-      if (sortBy === 'popularity') {
-        const popA = a.rawObject?.popularity ?? (a.rawObject?.popularity_score ?? (a.audioFeatures?.popularity ?? -1));
-        const popB = b.rawObject?.popularity ?? (b.rawObject?.popularity_score ?? (b.audioFeatures?.popularity ?? -1));
-        return popB - popA;
+      let valA: any;
+      let valB: any;
+
+      if (effectiveSortBy === 'name') {
+        valA = a.name;
+        valB = b.name;
+        const comp = valA.localeCompare(valB);
+        return sortOrder === 'asc' ? comp : -comp;
+      } else if (effectiveSortBy === 'popularity') {
+        valA = a.rawObject?.trackSnapshot?.popularity ?? 
+               (a.rawObject?.trackSnapshot?.popularity_score ?? 
+               (a.rawObject?.popularity ?? 
+               (a.rawObject?.popularity_score ?? 
+               (a.audioFeatures?.popularity ?? 0))));
+        valB = b.rawObject?.trackSnapshot?.popularity ?? 
+               (b.rawObject?.trackSnapshot?.popularity_score ?? 
+               (b.rawObject?.popularity ?? 
+               (b.rawObject?.popularity_score ?? 
+               (b.audioFeatures?.popularity ?? 0))));
+      } else {
+        valA = a.audioFeatures?.[effectiveSortBy] ?? 0;
+        valB = b.audioFeatures?.[effectiveSortBy] ?? 0;
       }
 
-      // 6가지 오디오 특성 기준 정렬 (Acoustic, Dance, Energy, Instrument, Speech, Valence)
-      const featA = a.audioFeatures?.[sortBy] ?? 0;
-      const featB = b.audioFeatures?.[sortBy] ?? 0;
-      return featB - featA;
+      if (valA === valB) return 0;
+      return sortOrder === 'asc' ? (valA > valB ? 1 : -1) : (valA < valB ? 1 : -1);
     });
-  }, [items, exploreTab, sortBy]);
+  }, [items, sortBy, sortOrder]);
 
   return (
     <GlassPanel 
@@ -257,24 +348,36 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
                     </button>
                   )}
 
-                  {/* 노래 리스트 정렬 드롭다운 (이름, 인기도, 음악 특성 6개) */}
-                  {exploreTab === 'song' && (
+                  {/* 정렬 드롭다운 (이름, 인기도[장르 제외], 음악 특성 6개) */}
+                  {items.length > 0 && (
                     <div className="flex items-center gap-1.5 ml-auto shrink-0 animate-fade-in">
-                      <span className="text-[10px] text-white/40 font-mono tracking-widest uppercase">SORT</span>
-                      <select
-                        value={sortBy}
-                        onChange={(e) => setSortBy(e.target.value)}
-                        className="bg-black/70 hover:bg-black/90 border border-white/10 focus:border-[#00FFFF]/60 text-[#00FFFF] text-[11px] font-mono font-bold px-2 py-1.5 rounded-lg focus:outline-none shadow-[0_0_10px_rgba(0,255,255,0.05)] focus:shadow-[0_0_15px_rgba(0,255,255,0.15)] cursor-pointer transition-all duration-300 outline-none"
-                      >
-                        <option value="popularity">🔥 인기도</option>
-                        <option value="name">🔤 이름순</option>
-                        <option value="acousticness">🎻 Acoustic</option>
-                        <option value="danceability">💃 Dance</option>
-                        <option value="energy">⚡ Energy</option>
-                        <option value="instrumentalness">🎹 Instrument</option>
-                        <option value="speechiness">🗣️ Speech</option>
-                        <option value="valence">🌈 Valence</option>
-                      </select>
+                      <span className="text-[10px] text-white/40 font-mono tracking-widest uppercase">보기</span>
+                      <div className="flex items-center gap-1.5">
+                        <select
+                          value={sortBy === 'popularity' && items.every(i => i.type === 'big_genre' || i.type === 'sub_genre') ? 'name' : sortBy}
+                          onChange={(e) => setSortBy(e.target.value)}
+                          className="bg-black/70 hover:bg-black/90 border border-white/10 focus:border-[#00FFFF]/60 text-[#00FFFF] text-[11px] font-mono font-bold px-2 py-1.5 rounded-lg focus:outline-none shadow-[0_0_10px_rgba(0,255,255,0.05)] focus:shadow-[0_0_15px_rgba(0,255,255,0.15)] cursor-pointer transition-all duration-300 outline-none"
+                        >
+                          {!items.every(i => i.type === 'big_genre' || i.type === 'sub_genre') && (
+                            <option value="popularity">인기도</option>
+                          )}
+                          <option value="name">이름순</option>
+                          <option value="acousticness">Acoustic</option>
+                          <option value="danceability">Dance</option>
+                          <option value="energy">Energy</option>
+                          <option value="instrumentalness">Instrument</option>
+                          <option value="speechiness">Speech</option>
+                          <option value="valence">Valence</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                          className="bg-black/70 hover:bg-black/90 border border-white/10 hover:border-[#00FFFF]/40 text-[#00FFFF] text-[11px] font-mono font-bold px-2 py-1.5 rounded-lg focus:outline-none shadow-[0_0_10px_rgba(0,255,255,0.05)] hover:shadow-[0_0_15px_rgba(0,255,255,0.15)] cursor-pointer transition-all duration-300 active:scale-95 shrink-0 flex items-center justify-center min-w-[28px]"
+                          title={sortOrder === 'asc' ? '오름차순' : '내림차순'}
+                        >
+                          {sortOrder === 'asc' ? '▲' : '▼'}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -330,6 +433,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
                   {/* 오디오 특성 실시간 미니 육각형 시각화 */}
                   {item.audioFeatures && (
                     <div className="shrink-0 ml-3 flex items-center">
+                      {renderSortValue(item)}
                       <MiniHexagon features={item.audioFeatures} itemType={item.type} />
                     </div>
                   )}
@@ -404,15 +508,48 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
           </div>
 
           {/* 유사 곡 추천 리스트 섹션 (디깅 전용 추가 레이아웃) */}
-          <div className="shrink-0 pt-2 border-t border-white/5">
-            <h3 className="text-xs font-mono tracking-widest text-[#00FFFF]/70 uppercase mb-2 flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#00FFFF] animate-ping" />
-              SIMILAR NEBULA DIGS
-            </h3>
+          <div className="shrink-0 pt-2 border-t border-white/5 flex flex-col min-h-0">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <h3 className="text-xs font-mono tracking-widest text-[#00FFFF]/70 uppercase flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#00FFFF] animate-ping" />
+                유사한 노래 리스트
+              </h3>
+              
+              {/* 유사 곡 리스트 분류 드롭다운 및 오름차순/내림차순 토글 버튼 */}
+              {items.length > 0 && (
+                <div className="flex items-center gap-1.5 shrink-0 animate-fade-in">
+                  <span className="text-[9px] text-white/40 font-mono tracking-widest uppercase">보기</span>
+                  <div className="flex items-center gap-1">
+                    <select
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value)}
+                      className="bg-black/70 hover:bg-black/90 border border-white/10 focus:border-[#00FFFF]/60 text-[#00FFFF] text-[10px] font-mono font-bold px-1.5 py-1 rounded-lg focus:outline-none shadow-[0_0_10px_rgba(0,255,255,0.05)] cursor-pointer transition-all duration-300 outline-none"
+                    >
+                      <option value="popularity">인기도</option>
+                      <option value="name">이름순</option>
+                      <option value="acousticness">Acoustic</option>
+                      <option value="danceability">Dance</option>
+                      <option value="energy">Energy</option>
+                      <option value="instrumentalness">Instrument</option>
+                      <option value="speechiness">Speech</option>
+                      <option value="valence">Valence</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                      className="bg-black/70 hover:bg-black/90 border border-white/10 hover:border-[#00FFFF]/40 text-[#00FFFF] text-[10px] font-mono font-bold px-1.5 py-1 rounded-lg focus:outline-none shadow-[0_0_10px_rgba(0,255,255,0.05)] cursor-pointer transition-all duration-300 active:scale-95 shrink-0 flex items-center justify-center min-w-[20px]"
+                      title={sortOrder === 'asc' ? '오름차순' : '내림차순'}
+                    >
+                      {sortOrder === 'asc' ? '▲' : '▼'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
             
-            <div className="space-y-1.5">
-              {items && items.length > 0 ? (
-                items.map((item, idx) => (
+            <div className="space-y-1.5 overflow-y-auto max-h-[220px] pr-0.5 custom-scrollbar">
+              {sortedItems.length > 0 ? (
+                sortedItems.map((item, idx) => (
                   <button
                     key={item.id || idx}
                     onClick={() => onItemClick?.(item.rawObject || item)}
@@ -446,7 +583,8 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
                     </div>
                     
                     {item.audioFeatures && (
-                      <div className="shrink-0 ml-2">
+                      <div className="shrink-0 ml-2 flex items-center">
+                        {renderSortValue(item)}
                         <MiniHexagon features={item.audioFeatures} itemType="song" />
                       </div>
                     )}
