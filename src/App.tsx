@@ -1458,10 +1458,7 @@ function MainApp() {
                   DEEP DIVE: {mode === 'home' ? 'STANDBY' : 'READY'}<br />
                   HULL: 100%
                 </div>
-                <div className="absolute bottom-6 right-8 font-mono text-[9px] text-[#B026FF]/55 tracking-wider text-right leading-relaxed">
-                  AUTO-DECODE: ON<br />
-                  COCKPIT MODE
-                </div>
+
               </div>
             </div>
 
