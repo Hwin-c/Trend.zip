@@ -170,6 +170,30 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
   showTabSwitcher = false, showSubGenreToggle = false
 }) => {
   const { hoveredNodeId, setHoveredNodeId } = useDigging();
+  const [sortBy, setSortBy] = React.useState<string>('popularity');
+
+  // 노래 리스트가 왼쪽에 뜰 때 동적 정렬 기준 적용 (이름, 인기도, 6대 음악적 특성)
+  const sortedItems = React.useMemo(() => {
+    if (exploreTab !== 'song') return items;
+
+    const itemsCopy = [...items];
+    return itemsCopy.sort((a, b) => {
+      if (sortBy === 'name') {
+        return a.name.localeCompare(b.name);
+      }
+      
+      if (sortBy === 'popularity') {
+        const popA = a.rawObject?.popularity ?? (a.rawObject?.popularity_score ?? (a.audioFeatures?.popularity ?? -1));
+        const popB = b.rawObject?.popularity ?? (b.rawObject?.popularity_score ?? (b.audioFeatures?.popularity ?? -1));
+        return popB - popA;
+      }
+
+      // 6가지 오디오 특성 기준 정렬 (Acoustic, Dance, Energy, Instrument, Speech, Valence)
+      const featA = a.audioFeatures?.[sortBy] ?? 0;
+      const featB = b.audioFeatures?.[sortBy] ?? 0;
+      return featB - featA;
+    });
+  }, [items, exploreTab, sortBy]);
 
   return (
     <GlassPanel 
@@ -232,6 +256,27 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
                       {isLoadingSubGenres ? '로드 중...' : showSubGenres ? '세부 장르 ON' : '세부 장르 OFF'}
                     </button>
                   )}
+
+                  {/* 노래 리스트 정렬 드롭다운 (이름, 인기도, 음악 특성 6개) */}
+                  {exploreTab === 'song' && (
+                    <div className="flex items-center gap-1.5 ml-auto shrink-0 animate-fade-in">
+                      <span className="text-[10px] text-white/40 font-mono tracking-widest uppercase">SORT</span>
+                      <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value)}
+                        className="bg-black/70 hover:bg-black/90 border border-white/10 focus:border-[#00FFFF]/60 text-[#00FFFF] text-[11px] font-mono font-bold px-2 py-1.5 rounded-lg focus:outline-none shadow-[0_0_10px_rgba(0,255,255,0.05)] focus:shadow-[0_0_15px_rgba(0,255,255,0.15)] cursor-pointer transition-all duration-300 outline-none"
+                      >
+                        <option value="popularity">🔥 인기도</option>
+                        <option value="name">🔤 이름순</option>
+                        <option value="acousticness">🎻 Acoustic</option>
+                        <option value="danceability">💃 Dance</option>
+                        <option value="energy">⚡ Energy</option>
+                        <option value="instrumentalness">🎹 Instrument</option>
+                        <option value="speechiness">🗣️ Speech</option>
+                        <option value="valence">🌈 Valence</option>
+                      </select>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -239,8 +284,8 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
 
           {/* 항목 리스트 */}
           <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-1.5 custom-scrollbar">
-            {items.length > 0 ? (
-              items.map((item, idx) => (
+            {sortedItems.length > 0 ? (
+              sortedItems.map((item, idx) => (
                 <button
                   key={item.id || idx}
                   onClick={() => onItemClick?.(item.rawObject || item)}
